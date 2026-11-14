@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+/* Pickify "teal pulse" theme. Dark only. */
+:root {
+  --colorBackground: #0e0f12;
+  --colorSurface: #181b20;
+  --colorSurfaceHover: #22262d;
+  --colorBorder: #2a2e35;
+  --colorAccent: #2dd4bf;
+  --colorAccentHover: #5eead4;
+  --colorOnAccent: #04201d;
+  --colorTextPrimary: #f4f5f7;
+  --colorTextSecondary: #8b929c;
+  --colorDanger: #f87171;
+
+  color-scheme: dark;
+}
+
+/* Exposes the theme to Tailwind as bg-surface, text-accent, border-border, etc. */
+@theme inline {
+  --color-background: var(--colorBackground);
+  --color-surface: var(--colorSurface);
+  --color-surface-hover: var(--colorSurfaceHover);
+  --color-border: var(--colorBorder);
+  --color-accent: var(--colorAccent);
+  --color-accent-hover: var(--colorAccentHover);
+  --color-on-accent: var(--colorOnAccent);
+  --color-text-primary: var(--colorTextPrimary);
+  --color-text-secondary: var(--colorTextSecondary);
+  --color-danger: var(--colorDanger);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--colorBackground);
+  color: var(--colorTextPrimary);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+:focus-visible {
+  outline: 2px solid var(--colorAccent);
+  outline-offset: 2px;
+}
