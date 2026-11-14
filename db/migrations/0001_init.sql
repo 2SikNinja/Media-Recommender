@@ -1,8 +1,7 @@
 -- Pickify initial schema.
 --
--- Sessions are anonymous for v1: the API routes use the service role key and
--- identify a session by its random UUID. RLS is enabled on every table with no
--- policies, so the public anon key cannot read or write anything directly.
+-- Sessions are anonymous for v1: the API routes identify a session by its
+-- random UUID. Only the server connects to the database, using DATABASE_URL.
 
 create or replace function set_updated_at()
 returns trigger
@@ -94,9 +93,3 @@ create table playlist_tracks (
 
 -- Lets us clean up old abandoned sessions later.
 create index sessions_created_at_idx on sessions (created_at);
-
-alter table track_cache enable row level security;
-alter table sessions enable row level security;
-alter table session_rounds enable row level security;
-alter table playlists enable row level security;
-alter table playlist_tracks enable row level security;
