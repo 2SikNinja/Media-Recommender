@@ -1,27 +1,31 @@
 import "server-only";
 
-import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import { neon } from "@neondatabase/serverless";
 
-let cachedSql: NeonQueryFunction<false, false> | null = null;
+import type { Db } from "./dbTypes";
+
+let cachedDb: Db | null = null;
 
 /**
- * SQL tag for API routes, using Neon's HTTP driver (no connection pool to manage
- * in serverless functions). Values passed in the template are sent as query
- * parameters, never pasted into the SQL text:
- *
- *   const sql = getSql();
- *   const rows = await sql`select * from sessions where id = ${sessionId}`;
+ * Database for API routes, using Neon's HTTP driver (no connection pool to
+ * manage in serverless functions). Values are always passed as parameters,
+ * never pasted into the SQL text.
  *
  * The "server-only" import makes the build fail if this ends up in browser code.
  */
-export function getSql(): NeonQueryFunction<false, false> {
-  if (cachedSql) return cachedSql;
+export function getDb(): Db {
+  if (cachedDb) return cachedDb;
 
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is not set");
   }
 
-  cachedSql = neon(databaseUrl);
-  return cachedSql;
+  const sql = neon(databaseUrl);
+  cachedDb = {
+    query: async (text, params = []) => (await sql.query(text, params)) as never,
+    transaction: async (statements) =>
+      (await sql.transaction(statements.map(({ text, params = [] }) => sql.query(text, params)))) as never,
+  };
+  return cachedDb;
 }

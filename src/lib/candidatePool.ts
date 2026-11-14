@@ -14,6 +14,8 @@ export type PoolEntry = {
   score: number;
   /** How many seed or picked songs listed this one as similar. */
   hits: number;
+  /** Set when the user rerolled past this song. It stays out of rounds and the playlist for good. */
+  rejected?: boolean;
 };
 
 export type CandidatePool = Record<string, PoolEntry>;
@@ -36,6 +38,7 @@ export function addSimilarTracks(pool: CandidatePool, similarTracks: SimilarTrac
     const existingEntry = nextPool[track.trackKey];
     nextPool[track.trackKey] = existingEntry
       ? {
+          ...existingEntry,
           track: {
             ...existingEntry.track,
             durationSeconds: existingEntry.track.durationSeconds ?? track.durationSeconds,
@@ -69,8 +72,23 @@ export function penalizeSkipped(
   return nextPool;
 }
 
+/**
+ * Marks songs as rejected ("none of these"). They keep their place in the pool
+ * so a later pick that lists them as similar can't bring them back.
+ */
+export function rejectTracks(pool: CandidatePool, tracks: Track[]): CandidatePool {
+  const nextPool: CandidatePool = { ...pool };
+  for (const track of tracks) {
+    const existingEntry = nextPool[track.trackKey];
+    nextPool[track.trackKey] = existingEntry
+      ? { ...existingEntry, rejected: true }
+      : { track, score: 0, hits: 0, rejected: true };
+  }
+  return nextPool;
+}
+
 function rankEntries(pool: CandidatePool): PoolEntry[] {
-  return Object.values(pool).sort(
+  return Object.values(pool).filter((entry) => !entry.rejected).sort(
     (first, second) =>
       second.score - first.score ||
       second.hits - first.hits ||
