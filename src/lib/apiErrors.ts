@@ -1,3 +1,4 @@
+import { unstable_rethrow } from "next/navigation";
 import { ZodError } from "zod";
 
 import { LastfmError } from "./lastfm";
@@ -38,8 +39,12 @@ function errorResponse(code: ApiErrorCode, message: string): Response {
  * Turns any thrown error into a JSON response. Known errors keep their message;
  * anything unexpected is logged and returned as a generic 500 so internal
  * details never reach the browser.
+ *
+ * Next.js signals things like "this route is dynamic" by throwing its own
+ * errors, so those are rethrown first instead of being turned into a 500.
  */
 export function toErrorResponse(error: unknown, context: string): Response {
+  unstable_rethrow(error);
   if (error instanceof ApiError) {
     return errorResponse(error.code, error.message);
   }
