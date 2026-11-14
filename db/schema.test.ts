@@ -25,14 +25,6 @@ async function createSession(): Promise<string> {
 }
 
 describe("schema", () => {
-  it("enables row level security on every table", async () => {
-    const result = await db.query<{ relname: string; relrowsecurity: boolean }>(
-      "select relname, relrowsecurity from pg_class where relkind = 'r' and relnamespace = 'public'::regnamespace",
-    );
-    expect(result.rows.length).toBeGreaterThan(0);
-    for (const row of result.rows) expect(row, row.relname).toMatchObject({ relrowsecurity: true });
-  });
-
   it("only allows one row per session round", async () => {
     const sessionId = await createSession();
     const insertRound = "insert into session_rounds (session_id, round_number, candidates) values ($1, 1, '[]')";

@@ -9,7 +9,7 @@ Pick a song you like. Pickify shows you 10 similar songs, you choose your favori
 | Frontend and API | Next.js (App Router), TypeScript, Tailwind CSS |
 | Song similarity | Last.fm API (`track.getSimilar`) |
 | YouTube matching | Python resolver using `ytmusicapi` (in `/resolver`) |
-| Database | Supabase Postgres |
+| Database | Neon Postgres |
 | Hosting | Vercel (two projects: the app and the resolver) |
 
 ## Project layout
@@ -17,9 +17,10 @@ Pick a song you like. Pickify shows you 10 similar songs, you choose your favori
 ```
 resolver/             Python service that finds a YouTube video for each song
 src/app/              Next.js pages and API routes
-src/lib/              Shared logic (Last.fm client, candidate pool, Supabase client)
+src/lib/              Shared logic (Last.fm client, candidate pool, database client)
 src/components/       UI components
-supabase/migrations/  Database schema
+db/migrations/        Database schema (applied with npm run db:migrate)
+scripts/              Dev scripts
 public/               Static assets
 ```
 
@@ -35,11 +36,19 @@ The logic lives in `src/lib/candidatePool.ts`.
 
 ## Database setup
 
-1. Create a project at https://supabase.com.
-2. Open the **SQL Editor**, paste the contents of `supabase/migrations/0001_init.sql`, and run it. If you use the Supabase CLI, run `supabase db push` instead.
-3. Copy the project URL and the **secret** key from **Project Settings → API** into `SUPABASE_URL` and `SUPABASE_SECRET_KEY` in `.env.local`.
+1. In the Vercel project, open **Storage → Create Database** and choose **Neon**. Connect it to the project. This sets `DATABASE_URL` and `DATABASE_URL_UNPOOLED` for you.
+2. Pull the variables locally:
+   ```bash
+   npx vercel link
+   npx vercel env pull .env.local
+   ```
+3. Create the tables:
+   ```bash
+   npm run db:migrate
+   ```
+   This applies any files in `db/migrations` that haven't run yet and records them in a `schema_migrations` table, so it's safe to run again. Requires Node 22 or newer.
 
-All tables have row level security turned on with no policies. Only the server, using the secret key, can read or write them.
+To change the schema later, add a new numbered file such as `db/migrations/0002_add_column.sql` and run `npm run db:migrate` again. Don't edit a migration that has already been applied.
 
 ## Running locally
 
@@ -76,7 +85,7 @@ npm test            # run once
 npm run testWatch   # rerun on save
 ```
 
-The tests cover the candidate pool, the Last.fm client (with a mocked API) and the database schema, which runs in an in-memory Postgres, so you don't need a Supabase project to run them.
+The tests cover the candidate pool, the Last.fm client (with a mocked API), the migration script and the database schema. The database tests run in an in-memory Postgres, so you don't need a Neon database to run them.
 
 ## Deploying
 
