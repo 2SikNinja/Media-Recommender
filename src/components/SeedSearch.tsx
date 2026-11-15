@@ -2,7 +2,7 @@
 
 import { LoaderCircle, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, useTransition } from "react";
 
 import { createSession, errorMessage, searchTracks, type Track } from "@/lib/apiClient";
 
@@ -18,8 +18,13 @@ export function SeedSearch() {
   const inputId = useId();
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<SearchResult | null>(null);
-  const [startingKey, setStartingKey] = useState<string | null>(null);
+  const [creatingKey, setCreatingKey] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
+  // Navigation runs in a transition so its busy state ends when the next page
+  // shows. Next.js keeps this page alive in the background, so anything still
+  // marked busy here would come back as a stuck spinner on Back.
+  const [isNavigating, startNavigation] = useTransition();
+  const [navigatingKey, setNavigatingKey] = useState<string | null>(null);
 
   const trimmedQuery = query.trim();
   const isLongEnough = trimmedQuery.length >= minimumQueryLength;
@@ -45,15 +50,21 @@ export function SeedSearch() {
   const currentResult = isLongEnough && result?.forQuery === trimmedQuery ? result : null;
   const isSearching = isLongEnough && !currentResult;
 
+  const startingKey = creatingKey ?? (isNavigating ? navigatingKey : null);
+
   async function start(track: Track) {
-    setStartingKey(track.trackKey);
+    setCreatingKey(track.trackKey);
     setStartError(null);
     try {
       const session = await createSession({ artist: track.artist, title: track.title });
-      router.push(`/session/${session.sessionId}`);
+      startNavigation(() => {
+        setNavigatingKey(track.trackKey);
+        setCreatingKey(null);
+        router.push(`/session/${session.sessionId}`);
+      });
     } catch (error) {
       setStartError(errorMessage(error));
-      setStartingKey(null);
+      setCreatingKey(null);
     }
   }
 
@@ -122,7 +133,7 @@ export function SeedSearch() {
                     aria-busy={isStarting}
                     className="flex w-full items-center gap-4 rounded-xl p-2.5 text-left transition-colors hover:bg-surface disabled:cursor-wait disabled:opacity-60 aria-busy:opacity-100"
                   >
-                    <RecordArt artist={track.artist} imageUrl={track.imageUrl} size={44} spinning={isStarting} />
+                    <RecordArt artist={track.artist} title={track.title} imageUrl={track.imageUrl} size={44} spinning={isStarting} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-medium">{track.title}</span>
                       <span className="block truncate text-sm text-text-secondary">{track.artist}</span>

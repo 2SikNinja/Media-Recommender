@@ -142,8 +142,9 @@ export async function createSession(deps: SessionDeps, input: CreateSessionInput
     throw new ApiError("invalidRequest", "Enter a song title and artist with letters or numbers in them.");
   }
 
-  // Prefer Last.fm's spelling of the song so cache keys stay consistent.
-  const seed = (await musicSource.getTrackInfo(input.artist, input.title)) ?? {
+  // Seeds come from Last.fm search results, so the names are already Last.fm's
+  // spelling. Skipping a separate track.getInfo call keeps "Start here" fast.
+  const seed: Track = {
     trackKey: makeTrackKey(input.artist, input.title),
     artist: input.artist,
     title: input.title,

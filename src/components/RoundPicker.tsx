@@ -3,7 +3,7 @@
 import { LoaderCircle, Shuffle } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 import { ApiClientError, errorMessage, getSession, rerollRound, submitPick, type SessionState } from "@/lib/apiClient";
 
@@ -18,7 +18,11 @@ export function RoundPicker() {
   const [session, setSession] = useState<SessionState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selection, setSelection] = useState<{ round: number; trackKeys: string[] } | null>(null);
-  const [pending, setPending] = useState<PendingAction>(null);
+  const [pendingRequest, setPendingRequest] = useState<PendingAction>(null);
+  // Moving to the playlist runs in a transition, so the busy state ends when the
+  // playlist shows instead of coming back stuck if you press Back.
+  const [isNavigating, startNavigation] = useTransition();
+  const pending: PendingAction = pendingRequest ?? (isNavigating ? "pick" : null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -63,21 +67,25 @@ export function RoundPicker() {
 
   function applyState(next: SessionState) {
     if (next.status === "complete" && next.playlistId) {
-      router.push(`/playlist/${next.playlistId}`);
+      const playlistId = next.playlistId;
+      startNavigation(() => {
+        setPendingRequest(null);
+        router.push(`/playlist/${playlistId}`);
+      });
       return;
     }
     setSession(next);
-    setPending(null);
+    setPendingRequest(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function runAction(action: Exclude<PendingAction, null>, call: () => Promise<SessionState>) {
-    setPending(action);
+    setPendingRequest(action);
     setActionError(null);
     try {
       applyState(await call());
     } catch (error) {
-      setPending(null);
+      setPendingRequest(null);
       setActionError(errorMessage(error));
       // Someone else (another tab, a retry) moved the session on. Catch up.
       if (error instanceof ApiClientError && error.code === "conflict") {

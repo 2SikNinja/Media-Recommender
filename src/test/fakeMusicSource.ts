@@ -14,7 +14,7 @@ export function createFakeMusicSource({ similarCount = 30, catalogSize = 400, ar
   const catalog = Array.from({ length: catalogSize }, (_, index) =>
     makeTrack(`Artist ${index % artistCount}`, `Song ${index}`),
   );
-  const calls = { getTrackInfo: 0, getSimilarTracks: 0 };
+  const calls = { getSimilarTracks: 0 };
   const noSimilarSongs = new Set<string>();
 
   function seedNumber(text: string): number {
@@ -24,10 +24,6 @@ export function createFakeMusicSource({ similarCount = 30, catalogSize = 400, ar
   }
 
   const musicSource: MusicSource = {
-    async getTrackInfo(artist, title) {
-      calls.getTrackInfo += 1;
-      return makeTrack(artist, title);
-    },
     async getSimilarTracks(artist, title) {
       calls.getSimilarTracks += 1;
       if (noSimilarSongs.has(makeTrackKey(artist, title))) return [];
