@@ -34,49 +34,95 @@ public/               Static assets
 
 The logic lives in `src/lib/candidatePool.ts`.
 
-## Database setup
+## API
 
-1. In the Vercel project, open **Storage → Create Database** and choose **Neon**. Connect it to the project. This sets `DATABASE_URL` and `DATABASE_URL_UNPOOLED` for you.
-2. Pull the variables locally:
-   ```bash
-   npx vercel link
-   npx vercel env pull .env.local
-   ```
-3. Create the tables:
-   ```bash
-   npm run db:migrate
-   ```
-   This applies any files in `db/migrations` that haven't run yet and records them in a `schema_migrations` table, so it's safe to run again. Requires Node 22 or newer.
+All endpoints return JSON. Errors look like `{ "error": { "code": "conflict", "message": "..." } }`, where `message` is safe to show to users. Codes: `invalidRequest` (400), `notFound` (404), `conflict` (409), `noSuggestions` (422), `upstreamUnavailable` (503), `internalError` (500).
 
-To change the schema later, add a new numbered file such as `db/migrations/0002_add_column.sql` and run `npm run db:migrate` again. Don't edit a migration that has already been applied.
+| Method | Path | Body | Returns |
+| --- | --- | --- | --- |
+| `GET` | `/api/tracks/search?q=believe` | | `{ tracks }`: up to 10 songs to pick a seed from |
+| `POST` | `/api/sessions` | `{ artist, title }` | Session state with round 1 (201) |
+| `GET` | `/api/sessions/:sessionId` | | Session state |
+| `POST` | `/api/sessions/:sessionId/picks` | `{ roundNumber, trackKey }` | Session state with the next round, or `status: "complete"` and a `playlistId` after the last round |
+| `POST` | `/api/sessions/:sessionId/reroll` | `{ roundNumber }` | Session state with 10 new songs for the same round ("none of these") |
+| `GET` | `/api/playlists/:playlistId` | | `{ playlistId, title, tracks }` with 50 songs in order |
+| `POST` | `/api/playlists/:playlistId/export/youtube` | `{ shuffle?: boolean }` | `{ youtubeUrl, youtubeMusicUrl, trackCount, unresolvedTracks }` |
+
+**Session state** has the shape `{ sessionId, status, seed, currentRound, totalRounds, candidates, picks, playlistId }`. `candidates` holds the songs for the current round, and each song is `{ trackKey, artist, title, durationSeconds, imageUrl }`.
+
+Notes:
+
+- **Picks are safe to retry.** Sending the same pick again returns the current state, and a different pick for a round that's already done returns `409 conflict`.
+- **Rerolled songs never come back**, in later rounds or in the playlist.
+- **Sessions can end early.** If Last.fm runs out of new suggestions, the session finishes before round 5 instead of showing an empty round.
+- **The export only sends songs to the resolver that aren't cached yet**, and it saves new matches for 30 days. `youtubeMusicUrl` is `null` when YouTube doesn't hand back a temporary playlist ID. In that case, use `youtubeUrl`.
+
+## Database
+
+Neon Postgres project `pickify` with two branches:
+
+| Branch | Used by |
+| --- | --- |
+| `main` | Production deployments |
+| `dev` | Preview deployments and local development |
+
+The `dev` branch has its own password, so local work and pull request previews never touch production data. The connection strings are already set in Vercel. Production and preview values are write-only Secrets, and the development values come down with `vercel env pull`.
+
+**Migrations** live in `db/migrations` and run with `npm run db:migrate`. The command applies any files that haven't run yet, in order, and records them in a `schema_migrations` table, so it's safe to run again. Requires Node 22 or newer.
+
+- **Locally**, `npm run db:migrate` updates the `dev` branch.
+- **On Vercel**, the build command is `npm run db:migrate && npm run build`, so every deployment migrates its own database first. If a migration fails, the build fails and nothing ships.
+
+To change the schema, add a new numbered file such as `db/migrations/0002_add_column.sql`, run `npm run db:migrate` locally, and open a PR. Don't edit a migration that has already been applied.
 
 ## Running locally
+
+Local development uses the Neon `dev` branch, a copy of the database with its own password, so nothing you do locally touches production data.
 
 ### App
 
 ```bash
-cp .env.example .env.local   # then fill in the values
 npm install
+npx vercel link                # once, pick the pickify project
+npx vercel env pull .env.local # dev database URL, local resolver URL and secret
 npm run dev
 ```
 
 Open http://localhost:3000.
 
+Production secrets are stored in Vercel as write-only Secrets and are never pulled. If `LASTFM_API_KEY` is missing from `.env.local` after pulling, put it in `.env.development.local` instead. Next.js reads that file too, and `vercel env pull` never overwrites it.
+
 ### Resolver
+
+The app calls the resolver at `RESOLVER_URL`, which is `http://localhost:8001` locally. Start it with the same `RESOLVER_SECRET` that's in your `.env.local`:
 
 ```bash
 cd resolver
 python -m venv .venv
-source .venv/bin/activate      # Windows: .venv\Scripts\activate
+.venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt uvicorn
-RESOLVER_SECRET=devSecret uvicorn main:app --reload --port 8001
+```
+
+Then, in PowerShell:
+
+```powershell
+$env:RESOLVER_SECRET = "<RESOLVER_SECRET from .env.local>"
+uvicorn main:app --reload --port 8001
+```
+
+or in macOS/Linux shells:
+
+```bash
+RESOLVER_SECRET="<RESOLVER_SECRET from .env.local>" uvicorn main:app --reload --port 8001
 ```
 
 Check that YouTube searches work:
 
 ```bash
-curl -H "x-resolver-secret: devSecret" http://localhost:8001/health/youtube
+curl -H "x-resolver-secret: <secret>" http://localhost:8001/health/youtube
 ```
+
+You only need the resolver running to test the YouTube export. Search, sessions and playlists work without it.
 
 ### Tests
 
@@ -89,9 +135,14 @@ The tests cover the candidate pool, the Last.fm client (with a mocked API), the 
 
 ## Deploying
 
-1. **App:** import this repo into Vercel with the default settings.
-2. **Resolver:** import the same repo as a second Vercel project and set **Root Directory** to `resolver`. Add a `RESOLVER_SECRET` environment variable, then call `/health/youtube` on the deployed URL to confirm YouTube doesn't block Vercel's servers.
-3. In the app project, set `RESOLVER_URL` to the resolver's URL and `RESOLVER_SECRET` to the same secret.
+Pushing to `master` deploys both Vercel projects:
+
+| Project | Root directory | URL |
+| --- | --- | --- |
+| `pickify` | repo root | https://pickify.ppeternnguyen.com |
+| `pickify-resolver` | `resolver` | Called only by the app, with `RESOLVER_SECRET` |
+
+Pull requests get preview deployments of the app that use the `dev` database. To check that the deployed resolver can still reach YouTube, call `/health/youtube` on it with the `x-resolver-secret` header.
 
 ## Theme
 

@@ -5,6 +5,7 @@ import {
   buildPlaylist,
   penalizeSkipped,
   pickWeight,
+  rejectTracks,
   selectRound,
   type CandidatePool,
 } from "./candidatePool";
@@ -137,5 +138,24 @@ describe("buildPlaylist", () => {
     const playlist = buildPlaylist({ seed: makeTrack("Seed", "Song"), picks: [], pool: penalizedPool, size: 2 });
 
     expect(playlist[1].title).toBe("Unseen");
+  });
+});
+
+describe("rejectTracks", () => {
+  it("keeps rejected songs out of rounds and playlists even after they are suggested again", () => {
+    const rejected = makeTrack("A", "Rejected");
+    const pool = rejectTracks(addSimilarTracks({}, [makeSimilar("A", "Rejected", 1)]), [rejected]);
+    const resuggestedPool = addSimilarTracks(pool, [makeSimilar("A", "Rejected", 1), makeSimilar("B", "Kept", 0.1)], 5);
+
+    expect(selectRound(resuggestedPool, []).map((track) => track.title)).toEqual(["Kept"]);
+    expect(
+      buildPlaylist({ seed: makeTrack("Seed", "Song"), picks: [], pool: resuggestedPool }).map((track) => track.title),
+    ).toEqual(["Song", "Kept"]);
+  });
+
+  it("can reject songs that were never in the pool", () => {
+    const pool = rejectTracks({}, [makeTrack("A", "Unknown")]);
+    expect(pool[makeTrackKey("A", "Unknown")].rejected).toBe(true);
+    expect(selectRound(pool, [])).toEqual([]);
   });
 });

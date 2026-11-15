@@ -1,0 +1,202 @@
+import { ApiError } from "./apiErrors";
+import type { Db } from "./dbTypes";
+import { ResolverError, type Resolver } from "./resolverClient";
+import {
+  buildWatchVideosUrl,
+  buildYoutubeMusicUrl,
+  fetchTemporaryPlaylistId,
+  shuffled,
+} from "./youtubeLinks";
+
+/** A cached YouTube match is trusted for this long before it's looked up again (uploads get taken down). */
+export const youtubeMatchMaxAgeDays = 30;
+
+export type PlaylistTrack = {
+  position: number;
+  trackKey: string;
+  artist: string;
+  title: string;
+  youtubeVideoId: string | null;
+};
+
+export type Playlist = {
+  playlistId: string;
+  sessionId: string;
+  title: string;
+  createdAt: string;
+  tracks: PlaylistTrack[];
+};
+
+type PlaylistRow = { id: string; session_id: string; title: string; created_at: Date | string };
+type PlaylistTrackRow = {
+  position: number;
+  track_key: string;
+  artist: string;
+  title: string;
+  youtube_video_id: string | null;
+};
+
+export async function getPlaylist(db: Db, playlistId: string): Promise<Playlist> {
+  const [playlistRows, trackRows] = await Promise.all([
+    db.query<PlaylistRow>("select id, session_id, title, created_at from playlists where id = $1", [playlistId]),
+    db.query<PlaylistTrackRow>(
+      `select position, track_key, artist, title, youtube_video_id
+         from playlist_tracks where playlist_id = $1 order by position`,
+      [playlistId],
+    ),
+  ]);
+  const playlist = playlistRows[0];
+  if (!playlist) {
+    throw new ApiError("notFound", "That playlist doesn't exist.");
+  }
+  return {
+    playlistId: playlist.id,
+    sessionId: playlist.session_id,
+    title: playlist.title,
+    createdAt: new Date(playlist.created_at).toISOString(),
+    tracks: trackRows.map((row) => ({
+      position: row.position,
+      trackKey: row.track_key,
+      artist: row.artist,
+      title: row.title,
+      youtubeVideoId: row.youtube_video_id,
+    })),
+  };
+}
+
+export type YoutubeExport = {
+  /** Always works: opens the songs as a queue on YouTube. */
+  youtubeUrl: string;
+  /** The same queue in YouTube Music, when YouTube returned a temporary playlist ID. */
+  youtubeMusicUrl: string | null;
+  trackCount: number;
+  unresolvedTracks: Array<Pick<PlaylistTrack, "position" | "artist" | "title">>;
+};
+
+export type ExportDeps = {
+  db: Db;
+  resolver: Resolver;
+  fetchImpl?: typeof fetch;
+  random?: () => number;
+};
+
+type CachedMatchRow = { track_key: string; youtube_video_id: string; duration_seconds: number | null };
+type DurationRow = { track_key: string; duration_seconds: number | null };
+
+/**
+ * Finds a YouTube video for every song in the playlist (cache first, then the
+ * resolver), saves the matches, and builds the links. Songs that can't be
+ * matched are listed instead of failing the whole export.
+ */
+export async function exportPlaylistToYoutube(
+  deps: ExportDeps,
+  playlistId: string,
+  options: { shuffle: boolean },
+): Promise<YoutubeExport> {
+  const { db, resolver, fetchImpl = fetch, random = Math.random } = deps;
+  const playlist = await getPlaylist(db, playlistId);
+  const videoIdByKey = new Map<string, string>();
+  for (const track of playlist.tracks) {
+    if (track.youtubeVideoId) videoIdByKey.set(track.trackKey, track.youtubeVideoId);
+  }
+
+  const missingTracks = playlist.tracks.filter((track) => !videoIdByKey.has(track.trackKey));
+  if (missingTracks.length > 0) {
+    const missingKeys = missingTracks.map((track) => track.trackKey);
+    const [cachedMatches, durations] = await Promise.all([
+      db.query<CachedMatchRow>(
+        `select track_key, youtube_video_id, duration_seconds from track_cache
+          where track_key = any($1::text[])
+            and youtube_video_id is not null
+            and youtube_resolved_at > now() - make_interval(days => $2)`,
+        [missingKeys, youtubeMatchMaxAgeDays],
+      ),
+      db.query<DurationRow>("select track_key, duration_seconds from track_cache where track_key = any($1::text[])", [
+        missingKeys,
+      ]),
+    ]);
+    for (const match of cachedMatches) videoIdByKey.set(match.track_key, match.youtube_video_id);
+    const durationByKey = new Map(durations.map((row) => [row.track_key, row.duration_seconds]));
+
+    const toResolve = missingTracks.filter((track) => !videoIdByKey.has(track.trackKey));
+    if (toResolve.length > 0) {
+      try {
+        const resolved = await resolver(
+          toResolve.map((track) => ({
+            artist: track.artist,
+            title: track.title,
+            durationSeconds: durationByKey.get(track.trackKey) ?? null,
+          })),
+        );
+        const newMatches = toResolve
+          .map((track, index) => ({ track, result: resolved[index] }))
+          .filter(({ result }) => result?.videoId && result.source);
+        for (const { track, result } of newMatches) videoIdByKey.set(track.trackKey, result.videoId as string);
+
+        if (newMatches.length > 0) {
+          await db.query(
+            `insert into track_cache (track_key, artist, title, youtube_video_id, youtube_source, youtube_confidence, youtube_resolved_at)
+             select match.track_key, left(match.artist, 200), left(match.title, 200), match.video_id, match.source, match.confidence, now()
+               from jsonb_to_recordset($1::jsonb)
+                 as match(track_key text, artist text, title text, video_id text, source text, confidence real)
+             on conflict (track_key) do update
+               set youtube_video_id = excluded.youtube_video_id,
+                   youtube_source = excluded.youtube_source,
+                   youtube_confidence = excluded.youtube_confidence,
+                   youtube_resolved_at = excluded.youtube_resolved_at`,
+            [
+              JSON.stringify(
+                newMatches.map(({ track, result }) => ({
+                  track_key: track.trackKey,
+                  artist: track.artist,
+                  title: track.title,
+                  video_id: result.videoId,
+                  source: result.source,
+                  confidence: result.confidence,
+                })),
+              ),
+            ],
+          );
+        }
+      } catch (error) {
+        if (!(error instanceof ResolverError)) throw error;
+        // Keep going with whatever is cached. Only fail if there is nothing to play.
+        console.error("[exportPlaylistToYoutube] resolver failed", error);
+        if (videoIdByKey.size === 0) {
+          throw new ApiError("upstreamUnavailable", "We couldn't reach YouTube right now. Try again in a moment.");
+        }
+      }
+    }
+
+    const savedMatches = missingTracks
+      .filter((track) => videoIdByKey.has(track.trackKey))
+      .map((track) => ({ position: track.position, video_id: videoIdByKey.get(track.trackKey) }));
+    if (savedMatches.length > 0) {
+      await db.query(
+        `update playlist_tracks set youtube_video_id = match.video_id
+           from jsonb_to_recordset($2::jsonb) as match(position int, video_id text)
+          where playlist_tracks.playlist_id = $1 and playlist_tracks.position = match.position`,
+        [playlistId, JSON.stringify(savedMatches)],
+      );
+    }
+  }
+
+  const playableTracks = playlist.tracks.filter((track) => videoIdByKey.has(track.trackKey));
+  if (playableTracks.length === 0) {
+    throw new ApiError("noSuggestions", "We couldn't find any of these songs on YouTube.");
+  }
+
+  const orderedTracks = options.shuffle ? shuffled(playableTracks, random) : playableTracks;
+  const videoIds = orderedTracks.map((track) => videoIdByKey.get(track.trackKey) as string);
+  const youtubeUrl = buildWatchVideosUrl(videoIds);
+  const temporaryPlaylistId = await fetchTemporaryPlaylistId(youtubeUrl, fetchImpl);
+
+  return {
+    youtubeUrl,
+    youtubeMusicUrl: temporaryPlaylistId ? buildYoutubeMusicUrl(videoIds[0], temporaryPlaylistId) : null,
+    trackCount: videoIds.length,
+    unresolvedTracks: playlist.tracks
+      .filter((track) => !videoIdByKey.has(track.trackKey))
+      .map(({ position, artist, title }) => ({ position, artist, title })),
+  };
+}
