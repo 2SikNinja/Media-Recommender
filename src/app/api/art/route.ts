@@ -1,8 +1,8 @@
-import { getAlbumArtUrl } from "@/lib/albumArt";
+import { getAlbumArtUrl, isAllowedArtUrl } from "@/lib/albumArt";
 import { toErrorResponse } from "@/lib/apiErrors";
 import { albumArtQuerySchema } from "@/lib/apiSchemas";
 import { getDb } from "@/lib/db";
-import { findAlbumArt, isDeezerImageUrl } from "@/lib/deezer";
+import { findAlbumArt } from "@/lib/deezer";
 
 const foundCacheControl = "public, max-age=86400, s-maxage=2592000, stale-while-revalidate=2592000";
 const missingCacheControl = "public, max-age=3600, s-maxage=86400";
@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     });
 
     const imageUrl = await getAlbumArtUrl(getDb(), (a, t) => findAlbumArt(a, t), artist, title);
-    if (!imageUrl || !isDeezerImageUrl(imageUrl)) {
+    if (!isAllowedArtUrl(imageUrl)) {
       return new Response(null, { status: 404, headers: { "Cache-Control": missingCacheControl } });
     }
     return new Response(null, { status: 302, headers: { Location: imageUrl, "Cache-Control": foundCacheControl } });

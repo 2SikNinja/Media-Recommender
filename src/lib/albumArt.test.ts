@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTestDb } from "@/test/pgliteDb";
 
-import { getAlbumArtUrl, type ArtFinder } from "./albumArt";
+import { getAlbumArtUrl, isAllowedArtUrl, type ArtFinder } from "./albumArt";
 import type { Db } from "./dbTypes";
 import { DeezerError } from "./deezer";
 
@@ -63,5 +63,39 @@ describe("getAlbumArtUrl", () => {
       "select image_url, similar_tracks from track_cache where track_key = 'cher::believe'",
     );
     expect(rows[0]).toEqual({ image_url: coverUrl, similar_tracks: [] });
+  });
+});
+
+describe("getAlbumArtUrl with covers saved from Last.fm", () => {
+  it("uses a Last.fm cover that's already cached without searching Deezer", async () => {
+    const lastfmCover = "https://lastfm-img.freetls.fastly.net/i/u/300x300/971d1dca9c90d75c8c9c15c77f055b4f.png";
+    await db.query(
+      "insert into track_cache (track_key, artist, title, image_url) values ('fred again::victory lap', 'Fred again..', 'Victory Lap', $1)",
+      [lastfmCover],
+    );
+    const findArt = vi.fn<ArtFinder>().mockResolvedValue(coverUrl);
+
+    await expect(getAlbumArtUrl(db, findArt, "Fred again..", "Victory Lap")).resolves.toBe(lastfmCover);
+    expect(findArt).not.toHaveBeenCalled();
+  });
+
+  it("looks the cover up on Deezer when the cached URL is from an unknown host", async () => {
+    await db.query(
+      "insert into track_cache (track_key, artist, title, image_url) values ('cher::believe', 'Cher', 'Believe', 'https://elsewhere.example/a.png')",
+    );
+    const findArt = vi.fn<ArtFinder>().mockResolvedValue(coverUrl);
+
+    await expect(getAlbumArtUrl(db, findArt, "Cher", "Believe")).resolves.toBe(coverUrl);
+  });
+});
+
+describe("isAllowedArtUrl", () => {
+  it("accepts Deezer and Last.fm image hosts only", () => {
+    expect(isAllowedArtUrl(coverUrl)).toBe(true);
+    expect(isAllowedArtUrl("https://lastfm.freetls.fastly.net/i/u/300x300/abc.png")).toBe(true);
+    expect(isAllowedArtUrl("https://lastfm-img.freetls.fastly.net/i/u/300x300/abc.png")).toBe(true);
+    expect(isAllowedArtUrl("https://other.freetls.fastly.net/a.png")).toBe(false);
+    expect(isAllowedArtUrl("http://lastfm.freetls.fastly.net/a.png")).toBe(false);
+    expect(isAllowedArtUrl(null)).toBe(false);
   });
 });

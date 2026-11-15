@@ -1,5 +1,25 @@
 import type { Db } from "./dbTypes";
+import { isDeezerImageUrl } from "./deezer";
 import { makeTrackKey } from "./tracks";
+
+const lastfmImageHosts = new Set(["lastfm.freetls.fastly.net", "lastfm-img.freetls.fastly.net"]);
+
+/**
+ * Cover URLs the art endpoint may redirect to: Deezer's image servers, and
+ * Last.fm's (some songs already have a Last.fm cover saved from search or
+ * similar-track results). An explicit list keeps the endpoint from being usable
+ * as a redirect to arbitrary sites.
+ */
+export function isAllowedArtUrl(value: unknown): value is string {
+  if (isDeezerImageUrl(value)) return true;
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && lastfmImageHosts.has(url.hostname);
+  } catch {
+    return false;
+  }
+}
 
 /** A lookup that found no cover is retried after this long, in case Deezer adds one. */
 export const missingArtRetryDays = 30;
@@ -22,7 +42,7 @@ export async function getAlbumArtUrl(db: Db, findArt: ArtFinder, artist: string,
     [trackKey, missingArtRetryDays],
   );
   const cached = rows[0];
-  if (cached?.image_url) return cached.image_url;
+  if (isAllowedArtUrl(cached?.image_url)) return cached.image_url;
   if (cached?.art_is_fresh) return null;
 
   const imageUrl = await findArt(artist, title);
