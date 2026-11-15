@@ -26,7 +26,7 @@ export function TrackCard({ track, selected, onToggle, disabled }: TrackCardProp
           : "border-transparent bg-surface hover:border-border hover:bg-surface-hover"
       } disabled:cursor-wait`}
     >
-      <RecordArt artist={track.artist} imageUrl={track.imageUrl} size={52} spinning={selected} />
+      <RecordArt artist={track.artist} title={track.title} imageUrl={track.imageUrl} size={52} spinning={selected} />
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium text-text-primary">{track.title}</span>
         <span className="block truncate text-sm text-text-secondary">{track.artist}</span>

@@ -1,6 +1,7 @@
 import { unstable_rethrow } from "next/navigation";
 import { ZodError } from "zod";
 
+import { DeezerError } from "./deezer";
 import { LastfmError } from "./lastfm";
 
 export type ApiErrorCode =
@@ -56,6 +57,10 @@ export function toErrorResponse(error: unknown, context: string): Response {
   if (error instanceof LastfmError) {
     console.error(`[${context}] Last.fm error`, { code: error.lastfmCode, status: error.httpStatus, message: error.message });
     return errorResponse("upstreamUnavailable", "The music service isn't responding right now. Try again in a moment.");
+  }
+  if (error instanceof DeezerError) {
+    console.error(`[${context}] Deezer error`, error.message);
+    return errorResponse("upstreamUnavailable", "Album art isn't available right now.");
   }
   console.error(`[${context}] unexpected error`, error);
   return errorResponse("internalError", "Something went wrong on our end. Try again.");

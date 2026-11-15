@@ -8,6 +8,7 @@ Pick a song you like. Pickify shows you 10 similar songs, you pick as many as yo
 | --- | --- |
 | Frontend and API | Next.js (App Router), TypeScript, Tailwind CSS |
 | Song similarity | Last.fm API (`track.getSimilar`) |
+| Album art | Deezer API (public, no key) |
 | YouTube matching | Python resolver using `ytmusicapi` (in `/resolver`) |
 | Database | Neon Postgres |
 | Hosting | Vercel (two projects: the app and the resolver) |
@@ -45,6 +46,7 @@ All endpoints return JSON. Errors look like `{ "error": { "code": "conflict", "m
 | `GET` | `/api/sessions/:sessionId` | | Session state |
 | `POST` | `/api/sessions/:sessionId/picks` | `{ roundNumber, trackKeys }` (1 to 10 songs) | Session state with the next round, or `status: "complete"` and a `playlistId` after the last round |
 | `POST` | `/api/sessions/:sessionId/reroll` | `{ roundNumber }` | Session state with 10 new songs for the same round ("none of these") |
+| `GET` | `/api/art?artist=&title=` | | Redirects to the album cover (302), or 404 when there isn't one. Used directly as an image source |
 | `GET` | `/api/playlists/:playlistId` | | `{ playlistId, title, tracks }` with 50 songs in order |
 | `POST` | `/api/playlists/:playlistId/export/youtube` | `{ shuffle?: boolean }` | `{ youtubeUrl, youtubeMusicUrl, trackCount, unresolvedTracks }` |
 
@@ -56,6 +58,7 @@ Notes:
 - **Every picked song counts.** Each one adds its similar songs to the pool, and all picks go at the front of the playlist, right after the seed, in the order they were shown.
 - **Rerolled songs never come back**, in later rounds or in the playlist.
 - **Sessions can end early.** If Last.fm runs out of new suggestions, the session finishes before round 5 instead of showing an empty round.
+- **Album covers are cached** in `track_cache`, including songs with no cover (retried after 30 days), and the CDN caches the redirects for 30 days.
 - **The export only sends songs to the resolver that aren't cached yet**, and it saves new matches for 30 days. `youtubeMusicUrl` is `null` when YouTube doesn't hand back a temporary playlist ID. In that case, use `youtubeUrl`.
 
 ## Database
