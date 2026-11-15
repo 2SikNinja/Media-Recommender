@@ -26,7 +26,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="flex min-h-full flex-col">
         <header className="mx-auto flex w-full max-w-5xl items-center px-5 py-5 sm:px-8">
           <Link href="/" className="flex items-center gap-2.5 rounded-md text-text-primary">
-            <Image src="/logo.svg" alt="" width={28} height={28} className="invert" priority />
+            <Image src="/logo.svg" alt="" width={34} height={34} priority />
             <span className="font-display text-xl font-semibold tracking-tight">Pickify</span>
           </Link>
         </header>
