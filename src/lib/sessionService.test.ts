@@ -27,7 +27,7 @@ const seedInput = { artist: "Seed Artist", title: "Seed Song" };
 async function pickFirst(state: SessionState): Promise<SessionState> {
   return submitPick(deps, state.sessionId, {
     roundNumber: state.currentRound as number,
-    trackKey: state.candidates[0].trackKey,
+    trackKeys: [state.candidates[0].trackKey],
   });
 }
 
@@ -107,11 +107,11 @@ describe("submitPick", () => {
     expect(rounds).toHaveLength(2);
   });
 
-  it("rejects a different pick for a round that already has one", async () => {
+  it("rejects different picks for a round that already has them", async () => {
     const state = await createSession(deps, seedInput);
     await pickFirst(state);
     await expectApiError(
-      submitPick(deps, state.sessionId, { roundNumber: 1, trackKey: state.candidates[1].trackKey }),
+      submitPick(deps, state.sessionId, { roundNumber: 1, trackKeys: [state.candidates[1].trackKey] }),
       "conflict",
     );
   });
@@ -119,11 +119,11 @@ describe("submitPick", () => {
   it("rejects songs that weren't offered and rounds that haven't started", async () => {
     const state = await createSession(deps, seedInput);
     await expectApiError(
-      submitPick(deps, state.sessionId, { roundNumber: 1, trackKey: "someone::else" }),
+      submitPick(deps, state.sessionId, { roundNumber: 1, trackKeys: ["someone::else"] }),
       "invalidRequest",
     );
     await expectApiError(
-      submitPick(deps, state.sessionId, { roundNumber: 2, trackKey: state.candidates[0].trackKey }),
+      submitPick(deps, state.sessionId, { roundNumber: 2, trackKeys: [state.candidates[0].trackKey] }),
       "conflict",
     );
   });
@@ -135,7 +135,7 @@ describe("submitPick", () => {
     while (state.status === "picking") {
       state = await submitPick(tinyDeps, state.sessionId, {
         roundNumber: state.currentRound as number,
-        trackKey: state.candidates[0].trackKey,
+        trackKeys: [state.candidates[0].trackKey],
       });
     }
     expect(state.picks.length).toBeLessThan(5);
@@ -144,6 +144,79 @@ describe("submitPick", () => {
 
   it("returns notFound for an unknown session", async () => {
     await expectApiError(getSessionState(db, crypto.randomUUID()), "notFound");
+  });
+});
+
+describe("submitPick with several songs", () => {
+  it("records every pick, in the order the round showed them, and puts them all in the playlist", async () => {
+    let state = await createSession(deps, seedInput);
+    const [second, fifth, eighth] = [state.candidates[1], state.candidates[4], state.candidates[7]];
+
+    state = await submitPick(deps, state.sessionId, {
+      roundNumber: 1,
+      trackKeys: [fifth.trackKey, second.trackKey, eighth.trackKey],
+    });
+
+    expect(state.currentRound).toBe(2);
+    expect(state.picks.map((track) => track.trackKey)).toEqual([second.trackKey, fifth.trackKey, eighth.trackKey]);
+
+    while (state.status === "picking") state = await pickFirst(state);
+    const playlistRows = await db.query<{ track_key: string }>(
+      "select track_key from playlist_tracks where playlist_id = $1 order by position",
+      [state.playlistId],
+    );
+    const pickedKeys = state.picks.map((track) => track.trackKey);
+    expect(pickedKeys).toHaveLength(7);
+    expect(playlistRows.slice(0, 8).map((row) => row.track_key)).toEqual([state.seed.trackKey, ...pickedKeys]);
+  });
+
+  it("keeps the round's order for picks no matter what order they were sent in", async () => {
+    const state = await createSession(deps, seedInput);
+    const next = await submitPick(deps, state.sessionId, {
+      roundNumber: 1,
+      trackKeys: [state.candidates[6].trackKey, state.candidates[2].trackKey],
+    });
+    expect(next.picks.map((track) => track.trackKey)).toEqual([state.candidates[2].trackKey, state.candidates[6].trackKey]);
+  });
+
+  it("treats a retry with the same songs in a different order as the same pick", async () => {
+    const state = await createSession(deps, seedInput);
+    const keys = [state.candidates[0].trackKey, state.candidates[3].trackKey];
+    const first = await submitPick(deps, state.sessionId, { roundNumber: 1, trackKeys: keys });
+    const retry = await submitPick(deps, state.sessionId, { roundNumber: 1, trackKeys: [...keys].reverse() });
+    expect(retry).toEqual(first);
+  });
+
+  it("ignores duplicate songs in one request", async () => {
+    const state = await createSession(deps, seedInput);
+    const key = state.candidates[0].trackKey;
+    const next = await submitPick(deps, state.sessionId, { roundNumber: 1, trackKeys: [key, key] });
+    expect(next.picks.map((track) => track.trackKey)).toEqual([key]);
+  });
+
+  it("rejects the whole request if any song wasn't offered", async () => {
+    const state = await createSession(deps, seedInput);
+    await expectApiError(
+      submitPick(deps, state.sessionId, { roundNumber: 1, trackKeys: [state.candidates[0].trackKey, "someone::else"] }),
+      "invalidRequest",
+    );
+    expect((await getSessionState(db, state.sessionId)).currentRound).toBe(1);
+  });
+
+  it("rejects an empty pick", async () => {
+    const state = await createSession(deps, seedInput);
+    await expectApiError(submitPick(deps, state.sessionId, { roundNumber: 1, trackKeys: [] }), "invalidRequest");
+  });
+
+  it("can pick all 10 songs in a round", async () => {
+    const state = await createSession(deps, seedInput);
+    const next = await submitPick(deps, state.sessionId, {
+      roundNumber: 1,
+      trackKeys: state.candidates.map((track) => track.trackKey),
+    });
+    expect(next.picks).toHaveLength(10);
+    expect(next.currentRound).toBe(2);
+    expect(fake.calls.getSimilarTracks).toBe(11);
   });
 });
 

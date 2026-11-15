@@ -58,10 +58,10 @@ export function getSession(sessionId: string): Promise<SessionState> {
   return request(`/api/sessions/${encodeURIComponent(sessionId)}`);
 }
 
-export function submitPick(sessionId: string, roundNumber: number, trackKey: string): Promise<SessionState> {
+export function submitPick(sessionId: string, roundNumber: number, trackKeys: string[]): Promise<SessionState> {
   return request(`/api/sessions/${encodeURIComponent(sessionId)}/picks`, {
     method: "POST",
-    body: JSON.stringify({ roundNumber, trackKey }),
+    body: JSON.stringify({ roundNumber, trackKeys }),
   });
 }
 

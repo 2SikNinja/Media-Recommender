@@ -17,7 +17,10 @@ const roundNumberSchema = z.number().int().min(1).max(10);
 
 export const submitPickSchema = z.object({
   roundNumber: roundNumberSchema,
-  trackKey: z.string().min(3).max(500),
+  trackKeys: z
+    .array(z.string().min(3).max(500))
+    .min(1, "must include at least one song")
+    .max(10, "can include at most 10 songs"),
 });
 
 export const rerollSchema = z.object({

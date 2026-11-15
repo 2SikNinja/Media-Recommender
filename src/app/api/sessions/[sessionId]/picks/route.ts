@@ -5,7 +5,7 @@ import { getSimilarTracks, getTrackInfo } from "@/lib/lastfm";
 import { submitPick } from "@/lib/sessionService";
 
 /**
- * POST /api/sessions/:sessionId/picks { roundNumber, trackKey }
+ * POST /api/sessions/:sessionId/picks { roundNumber, trackKeys }
  * Returns the next round, or the playlist ID after the last round. Safe to retry.
  */
 export async function POST(request: Request, context: RouteContext<"/api/sessions/[sessionId]/picks">) {
