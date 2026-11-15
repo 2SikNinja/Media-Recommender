@@ -3,7 +3,7 @@ import { idSchema, rerollSchema } from "@/lib/apiSchemas";
 import { getDb } from "@/lib/db";
 import { rerollRound } from "@/lib/sessionService";
 
-/** POST /api/sessions/:sessionId/reroll { roundNumber } — "none of these": a fresh 10 for the same round. */
+/** POST /api/sessions/:sessionId/reroll { roundNumber }: "none of these": a fresh 10 for the same round. */
 export async function POST(request: Request, context: RouteContext<"/api/sessions/[sessionId]/reroll">) {
   try {
     const sessionId = idSchema.parse((await context.params).sessionId);

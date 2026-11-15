@@ -2,7 +2,7 @@ import { toErrorResponse } from "@/lib/apiErrors";
 import { searchQuerySchema } from "@/lib/apiSchemas";
 import { searchTracks } from "@/lib/lastfm";
 
-/** GET /api/tracks/search?q=believe — songs to pick a seed from. */
+/** GET /api/tracks/search?q=believe: songs to pick a seed from. */
 export async function GET(request: Request) {
   try {
     const { q } = searchQuerySchema.parse({ q: new URL(request.url).searchParams.get("q") ?? "" });
