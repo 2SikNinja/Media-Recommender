@@ -10,6 +10,7 @@ Pick a song you like. Pickify shows you 10 similar songs, you pick as many as yo
 
 - **Pick as many as you like.** Every picked song pulls in its own similar songs, and songs that keep coming up rise to the top.
 - **Hear before you pick.** Tap any record for a 30-second preview.
+- **Skips teach it too.** Songs you pass on push similar songs down, and a thumbs-down ("Not for me") pushes them down hard.
 - **"None of these"** swaps the round for 10 new songs, and the skipped ones never come back.
 - **Edit before you play.** Take songs out of the playlist and put them back.
 - **Open in YouTube Music** in order or shuffled, with every song matched to a YouTube upload.
@@ -88,7 +89,12 @@ docs/screenshots/     Images for this README
 1. Last.fm's `track.getSimilar` returns songs similar to the seed, each with a similarity score from 0 to 1.
 2. Those songs go into a **candidate pool**. When a song shows up as similar to more than one of your picks, its scores add up, so it rises to the top.
 3. Each round shows the 10 highest-scoring songs you haven't seen yet, with at most 2 per artist.
-4. The similar songs for each song you picked are merged into the pool. Later picks count a little more than earlier ones. Songs you were shown and didn't pick are passed on for good, like "None of these".
+4. After each round:
+   - **Picks** add their own similar songs to the pool. Later rounds count more (×1.25 in round 1, up to ×2.25 in round 5).
+   - **Skips** (songs you saw and didn't check) take score away from their similar songs. A skip only means "less than the ones I picked", so all of a round's skips together weigh half as much as its picks.
+   - **"Not for me"** takes score away from its similar songs as strongly as a pick adds it.
+   - **Artists** you skip are ranked lower (×0.75 per skip, ×0.56 for "Not for me", never below ×0.25). Picking one of their songs later cancels that.
+   - Skipped and "Not for me" songs are out for good, like "None of these". Songs whose score drops to zero or below stop being suggested.
 5. The final playlist is the seed and your picks first, then the best songs left in the pool that you never passed on, up to 50 with at most 3 per artist. If the pool runs short, the playlist is shorter rather than padded with songs you skipped.
 
 The logic lives in `src/lib/candidatePool.ts`.
@@ -102,8 +108,8 @@ All endpoints return JSON. Errors look like `{ "error": { "code": "conflict", "m
 | `GET` | `/api/tracks/search?q=believe` | | `{ tracks }`: up to 10 songs to pick a seed from |
 | `POST` | `/api/sessions` | `{ artist, title }` | Session state with round 1 (201) |
 | `GET` | `/api/sessions/:sessionId` | | Session state |
-| `POST` | `/api/sessions/:sessionId/picks` | `{ roundNumber, trackKeys }` (1 to 10 songs) | Session state with the next round, or `status: "complete"` and a `playlistId` after the last round |
-| `POST` | `/api/sessions/:sessionId/reroll` | `{ roundNumber }` | Session state with 10 new songs for the same round ("none of these") |
+| `POST` | `/api/sessions/:sessionId/picks` | `{ roundNumber, trackKeys, dislikedKeys? }` (1 to 10 picks, plus songs marked "Not for me") | Session state with the next round, or `status: "complete"` and a `playlistId` after the last round |
+| `POST` | `/api/sessions/:sessionId/reroll` | `{ roundNumber, dislikedKeys? }` | Session state with 10 new songs for the same round ("none of these") |
 | `GET` | `/api/art?artist=&title=` | | Redirects to the album cover (302), or 404 when there isn't one. Used directly as an image source |
 | `GET` | `/api/preview?artist=&title=` | | Redirects to a 30-second preview clip (302), or 404 when there isn't one. Used directly as an audio source |
 | `GET` | `/api/playlists/:playlistId` | | `{ playlistId, sessionId, title, createdAt, tracks, removedTracks }`, songs in order |
