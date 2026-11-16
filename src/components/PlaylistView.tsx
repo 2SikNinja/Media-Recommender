@@ -1,20 +1,40 @@
 "use client";
 
-import { LoaderCircle, Play, Shuffle } from "lucide-react";
+import { LoaderCircle, Play, RotateCcw, Shuffle, X } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { errorMessage, exportToYoutube, getPlaylist, type Playlist, type YoutubeExport } from "@/lib/apiClient";
+import {
+  errorMessage,
+  exportToYoutube,
+  getPlaylist,
+  setTrackRemoved,
+  type Playlist,
+  type YoutubeExport,
+} from "@/lib/apiClient";
 
 import { PreviewDisc } from "./PreviewDisc";
 import { PreviewPlayerProvider, usePreviewPlayer } from "./PreviewPlayer";
 import { preloadAlbumArt } from "./RecordArt";
 
 type ExportMode = "inOrder" | "shuffled";
+type PlaylistTrack = Playlist["tracks"][number];
+
+/** Moves songs between the playing list and the removed list, keeping both in playlist order. */
+function withTrackRemoved(playlist: Playlist, track: PlaylistTrack, removed: boolean): Playlist {
+  const byPosition = (a: PlaylistTrack, b: PlaylistTrack) => a.position - b.position;
+  const others = (list: PlaylistTrack[]) => list.filter((item) => item.position !== track.position);
+  return {
+    ...playlist,
+    tracks: removed ? others(playlist.tracks) : [...playlist.tracks, track].sort(byPosition),
+    removedTracks: removed ? [...playlist.removedTracks, track].sort(byPosition) : others(playlist.removedTracks),
+  };
+}
 
 /** About how many rows fit on a tall screen, plus the seed's large disc. */
 const firstScreenTrackCount = 12;
+const toastSeconds = 6;
 
 export function PlaylistView() {
   return (
@@ -31,6 +51,9 @@ function PlaylistViewContent() {
   const [exporting, setExporting] = useState<ExportMode | null>(null);
   const [exportResult, setExportResult] = useState<YoutubeExport | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [lastRemoved, setLastRemoved] = useState<PlaylistTrack | null>(null);
+  const [showRemoved, setShowRemoved] = useState(false);
   const { stop: stopPreview } = usePreviewPlayer();
 
   useEffect(() => {
@@ -71,6 +94,34 @@ function PlaylistViewContent() {
     }
   }
 
+  // The undo prompt and edit errors go away on their own after a few seconds.
+  useEffect(() => {
+    if (!lastRemoved && !editError) return;
+    const timer = setTimeout(() => {
+      setLastRemoved(null);
+      setEditError(null);
+    }, toastSeconds * 1000);
+    return () => clearTimeout(timer);
+  }, [lastRemoved, editError]);
+
+  async function changeTrack(track: PlaylistTrack, removed: boolean) {
+    if (!playlist) return;
+    const previous = playlist;
+    // Show the change right away; the server's answer replaces it, or it's undone on failure.
+    setPlaylist(withTrackRemoved(playlist, track, removed));
+    setLastRemoved(removed ? track : null);
+    setEditError(null);
+    // The YouTube links no longer match the playlist.
+    setExportResult(null);
+    try {
+      setPlaylist(await setTrackRemoved(playlistId, track.position, removed));
+    } catch (error) {
+      setPlaylist(previous);
+      setLastRemoved(null);
+      setEditError(errorMessage(error));
+    }
+  }
+
   if (loadError) {
     return (
       <div className="mx-auto max-w-xl pt-16">
@@ -87,14 +138,18 @@ function PlaylistViewContent() {
     return <PlaylistSkeleton />;
   }
 
-  const seedTrack = playlist.tracks[0];
+  // The seed is always the first song, even if it was taken out of the list.
+  const seedTrack = [...playlist.tracks, ...playlist.removedTracks].sort((a, b) => a.position - b.position)[0];
+  const canRemove = playlist.tracks.length > 1 && exporting === null;
 
   return (
-    <section className="mx-auto w-full max-w-3xl pt-6 sm:pt-10">
+    <section className="mx-auto w-full max-w-3xl pt-6 pb-20 sm:pt-10">
       <div className="flex flex-col gap-6 sm:flex-row sm:items-end">
         {seedTrack && <PreviewDisc track={seedTrack} size={128} eager />}
         <div className="min-w-0">
-          <p className="text-text-secondary">Your playlist, {playlist.tracks.length} songs</p>
+          <p className="text-text-secondary">
+            Your playlist, {playlist.tracks.length} {playlist.tracks.length === 1 ? "song" : "songs"}
+          </p>
           <h1 className="mt-1 font-display text-4xl leading-tight font-semibold tracking-tight text-balance sm:text-5xl">
             {playlist.title}
           </h1>
@@ -178,16 +233,85 @@ function PlaylistViewContent() {
 
       <ol className="mt-10 flex flex-col">
         {playlist.tracks.map((track, index) => (
-          <li key={track.position} className="flex items-center gap-4 border-b border-border/60 py-3 last:border-b-0">
-            <span className="w-6 shrink-0 text-right text-sm text-text-secondary tabular-nums">{track.position}</span>
+          <li key={track.position} className="group flex items-center gap-4 border-b border-border/60 py-3 last:border-b-0">
+            <span className="w-6 shrink-0 text-right text-sm text-text-secondary tabular-nums">{index + 1}</span>
             <PreviewDisc track={track} size={40} eager={index < firstScreenTrackCount} />
             <span className="min-w-0 flex-1">
               <span className="block truncate font-medium">{track.title}</span>
               <span className="block truncate text-sm text-text-secondary">{track.artist}</span>
             </span>
+            {canRemove && (
+              <button
+                type="button"
+                onClick={() => void changeTrack(track, true)}
+                aria-label={`Remove ${track.title} by ${track.artist}`}
+                title="Remove from playlist"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-text-secondary hover:bg-surface hover:text-text-primary focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+              >
+                <X size={18} aria-hidden="true" />
+              </button>
+            )}
           </li>
         ))}
       </ol>
+
+      {playlist.removedTracks.length > 0 && (
+        <div className="mt-6 rounded-xl border border-border">
+          <button
+            type="button"
+            onClick={() => setShowRemoved((shown) => !shown)}
+            aria-expanded={showRemoved}
+            className="flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-sm text-text-secondary hover:text-text-primary"
+          >
+            <span>
+              {playlist.removedTracks.length === 1 ? "1 song removed" : `${playlist.removedTracks.length} songs removed`}
+            </span>
+            <span className="text-accent">{showRemoved ? "Hide" : "Show"}</span>
+          </button>
+          {showRemoved && (
+            <ul className="border-t border-border px-4">
+              {playlist.removedTracks.map((track) => (
+                <li key={track.position} className="flex items-center gap-4 border-b border-border/60 py-2.5 last:border-b-0">
+                  <span className="min-w-0 flex-1 text-sm">
+                    <span className="block truncate text-text-primary">{track.title}</span>
+                    <span className="block truncate text-text-secondary">{track.artist}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void changeTrack(track, false)}
+                    disabled={exporting !== null}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm hover:bg-surface disabled:opacity-50"
+                  >
+                    <RotateCcw size={14} aria-hidden="true" />
+                    Put back
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-5 z-10 flex justify-center px-5">
+        {editError ? (
+          <p role="alert" className="pointer-events-auto rounded-full border border-border bg-surface px-5 py-3 text-sm text-danger shadow-lg">
+            {editError}
+          </p>
+        ) : lastRemoved ? (
+          <div className="pointer-events-auto flex max-w-full items-center gap-4 rounded-full border border-border bg-surface py-2 pr-2 pl-5 text-sm shadow-lg">
+            <span className="min-w-0 truncate">
+              Removed <span className="text-text-primary">{lastRemoved.title}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => void changeTrack(lastRemoved, false)}
+              className="shrink-0 rounded-full px-3 py-1.5 font-medium text-accent hover:bg-surface-hover"
+            >
+              Undo
+            </button>
+          </div>
+        ) : null}
+      </div>
 
       <Link href="/" className="mt-10 inline-block rounded-full border border-border px-5 py-2.5 font-medium hover:bg-surface">
         Start a new playlist

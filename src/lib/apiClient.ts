@@ -76,6 +76,13 @@ export function getPlaylist(playlistId: string): Promise<Playlist> {
   return request(`/api/playlists/${encodeURIComponent(playlistId)}`);
 }
 
+export function setTrackRemoved(playlistId: string, position: number, removed: boolean): Promise<Playlist> {
+  return request(`/api/playlists/${encodeURIComponent(playlistId)}/tracks/${position}`, {
+    method: "PATCH",
+    body: JSON.stringify({ removed }),
+  });
+}
+
 export function exportToYoutube(playlistId: string, shuffle: boolean): Promise<YoutubeExport> {
   return request(`/api/playlists/${encodeURIComponent(playlistId)}/export/youtube`, {
     method: "POST",

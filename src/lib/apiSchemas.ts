@@ -35,3 +35,9 @@ export const rerollSchema = z.object({
 export const youtubeExportSchema = z.object({
   shuffle: z.boolean().default(false),
 });
+
+export const playlistPositionSchema = z.coerce.number().int().min(1).max(50);
+
+export const trackRemovalSchema = z.object({
+  removed: z.boolean(),
+});
