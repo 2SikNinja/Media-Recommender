@@ -7,22 +7,41 @@ import { useEffect, useState } from "react";
 
 import { errorMessage, exportToYoutube, getPlaylist, type Playlist, type YoutubeExport } from "@/lib/apiClient";
 
-import { RecordArt } from "./RecordArt";
+import { PreviewDisc } from "./PreviewDisc";
+import { PreviewPlayerProvider, usePreviewPlayer } from "./PreviewPlayer";
+import { preloadAlbumArt } from "./RecordArt";
 
 type ExportMode = "inOrder" | "shuffled";
 
+/** About how many rows fit on a tall screen, plus the seed's large disc. */
+const firstScreenTrackCount = 12;
+
 export function PlaylistView() {
+  return (
+    <PreviewPlayerProvider>
+      <PlaylistViewContent />
+    </PreviewPlayerProvider>
+  );
+}
+
+function PlaylistViewContent() {
   const { playlistId } = useParams<{ playlistId: string }>();
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [exporting, setExporting] = useState<ExportMode | null>(null);
   const [exportResult, setExportResult] = useState<YoutubeExport | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const { stop: stopPreview } = usePreviewPlayer();
 
   useEffect(() => {
     let isCurrent = true;
     getPlaylist(playlistId).then(
-      (loaded) => isCurrent && setPlaylist(loaded),
+      async (loaded) => {
+        // Covers for the songs visible on arrival load before the list shows;
+        // the rest load as they scroll into view.
+        await preloadAlbumArt(loaded.tracks.slice(0, firstScreenTrackCount));
+        if (isCurrent) setPlaylist(loaded);
+      },
       (error: unknown) => isCurrent && setLoadError(errorMessage(error)),
     );
     return () => {
@@ -31,6 +50,7 @@ export function PlaylistView() {
   }, [playlistId]);
 
   async function play(mode: ExportMode) {
+    stopPreview();
     // Open the tab now, while the click still counts as a user action, so popup
     // blockers allow it. It gets its address once the link is ready.
     const popup = window.open("about:blank", "_blank");
@@ -72,7 +92,7 @@ export function PlaylistView() {
   return (
     <section className="mx-auto w-full max-w-3xl pt-6 sm:pt-10">
       <div className="flex flex-col gap-6 sm:flex-row sm:items-end">
-        {seedTrack && <RecordArt artist={seedTrack.artist} title={seedTrack.title} size={128} />}
+        {seedTrack && <PreviewDisc track={seedTrack} size={128} eager />}
         <div className="min-w-0">
           <p className="text-text-secondary">Your playlist, {playlist.tracks.length} songs</p>
           <h1 className="mt-1 font-display text-4xl leading-tight font-semibold tracking-tight text-balance sm:text-5xl">
@@ -157,10 +177,10 @@ export function PlaylistView() {
       </div>
 
       <ol className="mt-10 flex flex-col">
-        {playlist.tracks.map((track) => (
+        {playlist.tracks.map((track, index) => (
           <li key={track.position} className="flex items-center gap-4 border-b border-border/60 py-3 last:border-b-0">
             <span className="w-6 shrink-0 text-right text-sm text-text-secondary tabular-nums">{track.position}</span>
-            <RecordArt artist={track.artist} title={track.title} size={40} />
+            <PreviewDisc track={track} size={40} eager={index < firstScreenTrackCount} />
             <span className="min-w-0 flex-1">
               <span className="block truncate font-medium">{track.title}</span>
               <span className="block truncate text-sm text-text-secondary">{track.artist}</span>

@@ -4,7 +4,7 @@ const trimmedName = z.string().trim().min(1, "can't be empty").max(200, "is too 
 
 export const idSchema = z.uuid("must be a valid ID");
 
-export const albumArtQuerySchema = z.object({
+export const trackQuerySchema = z.object({
   artist: trimmedName.refine((value) => /[\p{L}\p{N}]/u.test(value), "needs letters or numbers"),
   title: trimmedName.refine((value) => /[\p{L}\p{N}]/u.test(value), "needs letters or numbers"),
 });
