@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Geist } from "next/font/google";
 import Image from "next/image";
 import Link from "next/link";
@@ -20,6 +20,13 @@ export const metadata: Metadata = {
   description: "Start with one song, pick your favorites, and get a 50-song playlist to play on YouTube Music.",
   openGraph: { siteName: "Pickify", type: "website" },
   twitter: { card: "summary_large_image" },
+  // Added to an iPhone home screen, open full screen like an app.
+  appleWebApp: { capable: true, title: "Pickify", statusBarStyle: "black" },
+};
+
+export const viewport: Viewport = {
+  // Colors the browser bar (and the status bar when installed) to match the page.
+  themeColor: "#0e0f12",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
