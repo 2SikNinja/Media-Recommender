@@ -21,11 +21,11 @@ Pick a song you like. Pickify shows you 10 similar songs, you pick as many as yo
 
 | Picking songs | The playlist |
 | --- | --- |
-| ![A round of 10 songs with two picked and one preview playing](docs/screenshots/round.png) | ![A finished 50-song playlist with Play, Shuffle play and Share](docs/screenshots/playlist.png) |
+| ![A round of 10 songs with two picked and one preview playing](docs/screenshots/round.png) | ![A finished playlist with Play, Shuffle, Open in YouTube Music and Share](docs/screenshots/playlist.png) |
 
 | Search | On a phone |
 | --- | --- |
-| ![The home page with search results for Midnight City](docs/screenshots/home.png) | <img src="docs/screenshots/round-mobile.png" alt="A round on a phone" width="300"> |
+| ![The home page with a search for Feel Something and saved playlists](docs/screenshots/home.png) | <img src="docs/screenshots/round-mobile.png" alt="A round on a phone" width="300"> |
 
 ## How it fits together
 
