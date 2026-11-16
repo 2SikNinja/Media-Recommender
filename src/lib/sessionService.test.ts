@@ -7,6 +7,7 @@ import { ApiError } from "./apiErrors";
 import type { Db } from "./dbTypes";
 import { createSession, getSessionState, rerollRound, submitPick, type SessionState } from "./sessionService";
 import type { MusicSource } from "./trackCache";
+import { makeTrackKey, type SimilarTrack } from "./tracks";
 
 let db: Db & { close: () => Promise<void> };
 let fake: ReturnType<typeof createFakeMusicSource>;
@@ -264,12 +265,124 @@ describe("songs passed on in a round", () => {
   });
 });
 
+describe("skips and \"Not for me\"", () => {
+  // A tiny catalog where every connection is known. The seed suggests S1 to S10
+  // (round 1) plus Liked, Shared, NearSkip and SameArtist. Picking S1 suggests
+  // Liked and Shared. Marking S2 "Not for me" suggests Shared. Skipping S3
+  // suggests NearSkip. SameArtist is by S4's artist, who gets skipped.
+  const similarByKey: Record<string, Array<[string, string, number]>> = {
+    "seed artist::seed song": [
+      ...Array.from({ length: 10 }, (_, i): [string, string, number] => [`Artist ${i + 1}`, `S${i + 1}`, 0.9 - i * 0.04]),
+      ["Fan Favorite", "Liked", 0.1],
+      ["Middle Ground", "Shared", 0.1],
+      ["Lookalike", "NearSkip", 0.1],
+      ["Artist 4", "SameArtist", 0.1],
+    ],
+    "artist 1::s1": [
+      ["Fan Favorite", "Liked", 1],
+      ["Middle Ground", "Shared", 1],
+    ],
+    "artist 2::s2": [["Middle Ground", "Shared", 1]],
+    "artist 3::s3": [["Lookalike", "NearSkip", 1]],
+  };
+  const catalogSource: MusicSource = {
+    async getSimilarTracks(artist, title) {
+      return (similarByKey[makeTrackKey(artist, title)] ?? []).map(
+        ([similarArtist, similarTitle, match]): SimilarTrack => ({
+          trackKey: makeTrackKey(similarArtist, similarTitle),
+          artist: similarArtist,
+          title: similarTitle,
+          durationSeconds: null,
+          imageUrl: null,
+          match,
+        }),
+      );
+    },
+  };
+  const key = (artist: string, title: string) => makeTrackKey(artist, title);
+
+  async function playRoundOne(dislikedKeys: string[]) {
+    const catalogDeps = { db, musicSource: catalogSource };
+    const state = await createSession(catalogDeps, seedInput);
+    expect(state.candidates.map((track) => track.title)).toEqual(Array.from({ length: 10 }, (_, i) => `S${i + 1}`));
+    const next = await submitPick(catalogDeps, state.sessionId, {
+      roundNumber: 1,
+      trackKeys: [key("Artist 1", "S1")],
+      dislikedKeys,
+    });
+    const [row] = await db.query<{ candidate_pool: Record<string, { score: number }>; artist_feedback: Record<string, number> }>(
+      "select candidate_pool, artist_feedback from sessions where id = $1",
+      [state.sessionId],
+    );
+    return { next, pool: row.candidate_pool, feedback: row.artist_feedback };
+  }
+
+  it("lets a pick pull up its similar songs while \"Not for me\" pulls down its own, at full strength", async () => {
+    const { pool } = await playRoundOne([key("Artist 2", "S2")]);
+    const roundOneWeight = 1.25;
+    expect(pool[key("Fan Favorite", "Liked")].score).toBeCloseTo(0.1 + roundOneWeight);
+    // Suggested by the pick and by the disliked song equally, so it's back where the seed left it.
+    expect(pool[key("Middle Ground", "Shared")].score).toBeCloseTo(0.1);
+  });
+
+  it("pulls songs near a skipped one down gently, so all skips together weigh half the picks", async () => {
+    const { pool, next } = await playRoundOne([]);
+    // One pick and nine skips: each skip weighs half a pick, split nine ways.
+    const eachSkip = (0.5 * 1.25) / 9;
+    expect(pool[key("Lookalike", "NearSkip")].score).toBeCloseTo(0.1 - eachSkip);
+    expect(next.candidates.map((track) => track.title)).toContain("NearSkip");
+  });
+
+  it("drops songs out of rounds once the skips outweigh everything that suggested them", async () => {
+    const { pool, next } = await playRoundOne([key("Artist 3", "S3")]);
+    expect(pool[key("Lookalike", "NearSkip")].score).toBeLessThan(0);
+    expect(next.candidates.map((track) => track.title)).not.toContain("NearSkip");
+  });
+
+  it("counts the round against skipped and disliked artists, and for picked ones", async () => {
+    const { feedback, next } = await playRoundOne([key("Artist 2", "S2")]);
+    expect(feedback).toMatchObject({ "artist 1": 1, "artist 2": -2, "artist 4": -1 });
+    // SameArtist ties Shared on score but is by a skipped artist, so it comes after.
+    const titles = next.candidates.map((track) => track.title);
+    expect(titles.indexOf("SameArtist")).toBeGreaterThan(titles.indexOf("Shared"));
+  });
+
+  it("rejects \"Not for me\" songs that aren't in the round or are also picked", async () => {
+    const catalogDeps = { db, musicSource: catalogSource };
+    const state = await createSession(catalogDeps, seedInput);
+    await expectApiError(
+      submitPick(catalogDeps, state.sessionId, { roundNumber: 1, trackKeys: [key("Artist 1", "S1")], dislikedKeys: ["nope::nope"] }),
+      "invalidRequest",
+    );
+    await expectApiError(
+      submitPick(catalogDeps, state.sessionId, {
+        roundNumber: 1,
+        trackKeys: [key("Artist 1", "S1")],
+        dislikedKeys: [key("Artist 1", "S1")],
+      }),
+      "invalidRequest",
+    );
+  });
+
+  it("applies \"Not for me\" when the round is swapped with \"None of these\"", async () => {
+    const catalogDeps = { db, musicSource: catalogSource };
+    const state = await createSession(catalogDeps, seedInput);
+    await rerollRound(catalogDeps, state.sessionId, { roundNumber: 1, dislikedKeys: [key("Artist 2", "S2")] });
+    const [row] = await db.query<{ candidate_pool: Record<string, { score: number }>; artist_feedback: Record<string, number> }>(
+      "select candidate_pool, artist_feedback from sessions where id = $1",
+      [state.sessionId],
+    );
+    expect(row.candidate_pool[key("Middle Ground", "Shared")].score).toBeCloseTo(0.1 - 1.25);
+    expect(row.artist_feedback).toEqual({ "artist 2": -2 });
+  });
+});
+
 describe("rerollRound", () => {
   it("replaces the round with unseen songs and keeps rejected songs out of the playlist", async () => {
     const state = await createSession(deps, seedInput);
     const rejectedKeys = state.candidates.map((track) => track.trackKey);
 
-    const rerolled = await rerollRound(db, state.sessionId, 1);
+    const rerolled = await rerollRound(deps, state.sessionId, { roundNumber: 1 });
 
     expect(rerolled.currentRound).toBe(1);
     expect(rerolled.candidates.length).toBeGreaterThan(0);
@@ -287,6 +400,6 @@ describe("rerollRound", () => {
   it("refuses to reroll a round that is already picked", async () => {
     const state = await createSession(deps, seedInput);
     await pickFirst(state);
-    await expectApiError(rerollRound(db, state.sessionId, 1), "conflict");
+    await expectApiError(rerollRound(deps, state.sessionId, { roundNumber: 1 }), "conflict");
   });
 });

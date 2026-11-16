@@ -2,15 +2,20 @@ import { ApiError } from "./apiErrors";
 import {
   addSimilarTracks,
   buildPlaylist,
+  dislikeWeight,
   pickWeight,
   rejectSkipped,
   rejectTracks,
   selectRound,
+  skipWeight,
+  subtractSimilarTracks,
+  updateArtistFeedback,
+  type ArtistFeedback,
   type CandidatePool,
 } from "./candidatePool";
 import type { Db, Statement } from "./dbTypes";
 import { getSimilarTracksCached, type MusicSource } from "./trackCache";
-import { makeTrackKey, normalizeText, type Track } from "./tracks";
+import { makeTrackKey, normalizeText, type SimilarTrack, type Track } from "./tracks";
 
 /** Fewer suggestions than this for the seed means Last.fm doesn't know it well enough. */
 export const minimumFirstRoundSize = 4;
@@ -43,6 +48,7 @@ type SessionRow = {
   current_round: number;
   total_rounds: number;
   candidate_pool: CandidatePool;
+  artist_feedback: ArtistFeedback;
 };
 
 type RoundRow = {
@@ -51,8 +57,26 @@ type RoundRow = {
   picked_track_keys: string[] | null;
 };
 
-/** Similar-track lookups for several picks run a few at a time to stay under Last.fm's rate limit. */
-const similarLookupConcurrency = 3;
+/** Similar-track lookups for a round's songs run a few at a time to stay under Last.fm's rate limit. */
+const similarLookupConcurrency = 4;
+
+/** Similar songs for each track, in the same order. Cached for 30 days, so repeat lookups are free. */
+async function lookupSimilar(db: Db, musicSource: MusicSource, tracks: Track[]): Promise<SimilarTrack[][]> {
+  const lists: SimilarTrack[][] = [];
+  for (let start = 0; start < tracks.length; start += similarLookupConcurrency) {
+    const batch = tracks.slice(start, start + similarLookupConcurrency);
+    lists.push(...(await Promise.all(batch.map((track) => getSimilarTracksCached(db, musicSource, track)))));
+  }
+  return lists;
+}
+
+/** The round's songs for the given keys, in the round's order. Throws if any key isn't one of them. */
+function roundTracksFor(round: RoundRow, keys: string[], message: string): Track[] {
+  const keySet = new Set(keys);
+  const tracks = round.candidates.filter((track) => keySet.has(track.trackKey));
+  if (tracks.length !== keySet.size) throw new ApiError("invalidRequest", message);
+  return tracks;
+}
 
 type LoadedSession = {
   session: SessionRow;
@@ -113,7 +137,7 @@ function toState({ session, rounds, playlistId }: LoadedSession): SessionState {
 
 async function loadSession(db: Db, sessionId: string): Promise<LoadedSession> {
   const sessionRows = await db.query<SessionRow>(
-    `select id, seed_track_key, seed_artist, seed_title, status, current_round, total_rounds, candidate_pool
+    `select id, seed_track_key, seed_artist, seed_title, status, current_round, total_rounds, candidate_pool, artist_feedback
        from sessions where id = $1`,
     [sessionId],
   );
@@ -187,7 +211,12 @@ export async function createSession(deps: SessionDeps, input: CreateSessionInput
   return getSessionState(db, sessionId);
 }
 
-export type SubmitPickInput = { roundNumber: number; trackKeys: string[] };
+export type SubmitPickInput = {
+  roundNumber: number;
+  trackKeys: string[];
+  /** Songs marked "Not for me" in this round. */
+  dislikedKeys?: string[];
+};
 
 /**
  * Records the picks for a round (one or more songs), then either deals the next
@@ -220,24 +249,48 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
 
   // Keep the round's order so picks read the same way they were shown.
   const requestedKeySet = new Set(requestedKeys);
-  const pickedTracksThisRound = round.candidates.filter((track) => requestedKeySet.has(track.trackKey));
-  if (pickedTracksThisRound.length !== requestedKeys.length) {
-    throw new ApiError("invalidRequest", "One of those songs isn't one of this round's choices.");
+  const pickedTracksThisRound = roundTracksFor(round, requestedKeys, "One of those songs isn't one of this round's choices.");
+  const dislikedTracks = roundTracksFor(
+    round,
+    [...new Set(input.dislikedKeys ?? [])],
+    "One of the songs marked \"Not for me\" isn't one of this round's choices.",
+  );
+  if (dislikedTracks.some((track) => requestedKeySet.has(track.trackKey))) {
+    throw new ApiError("invalidRequest", "A song can't be both picked and marked \"Not for me\".");
   }
+  const dislikedKeySet = new Set(dislikedTracks.map((track) => track.trackKey));
+  const skippedTracks = round.candidates.filter(
+    (track) => !requestedKeySet.has(track.trackKey) && !dislikedKeySet.has(track.trackKey),
+  );
 
-  let poolWithPicks = session.candidate_pool;
-  for (let start = 0; start < pickedTracksThisRound.length; start += similarLookupConcurrency) {
-    const batch = pickedTracksThisRound.slice(start, start + similarLookupConcurrency);
-    const similarLists = await Promise.all(batch.map((track) => getSimilarTracksCached(db, musicSource, track)));
-    for (const similarTracks of similarLists) {
-      poolWithPicks = addSimilarTracks(poolWithPicks, similarTracks, pickWeight(input.roundNumber));
-    }
+  // Picks pull their similar songs up. Skips pull theirs down, gently, and
+  // "Not for me" pulls theirs down as strongly as a pick pulls up.
+  const [pickedSimilar, skippedSimilar, dislikedSimilar] = await Promise.all([
+    lookupSimilar(db, musicSource, pickedTracksThisRound),
+    lookupSimilar(db, musicSource, skippedTracks),
+    lookupSimilar(db, musicSource, dislikedTracks),
+  ]);
+  let scoredPool = session.candidate_pool;
+  for (const similarTracks of pickedSimilar) {
+    scoredPool = addSimilarTracks(scoredPool, similarTracks, pickWeight(input.roundNumber));
   }
-  const nextPool = rejectSkipped(poolWithPicks, round.candidates, requestedKeys);
+  const eachSkipWeight = skipWeight(input.roundNumber, pickedTracksThisRound.length, skippedTracks.length);
+  for (const similarTracks of skippedSimilar) {
+    scoredPool = subtractSimilarTracks(scoredPool, similarTracks, eachSkipWeight);
+  }
+  for (const similarTracks of dislikedSimilar) {
+    scoredPool = subtractSimilarTracks(scoredPool, similarTracks, dislikeWeight(input.roundNumber));
+  }
+  const nextPool = rejectSkipped(scoredPool, round.candidates, requestedKeys);
+  const artistFeedback = updateArtistFeedback(session.artist_feedback, {
+    picked: pickedTracksThisRound,
+    skipped: skippedTracks,
+    disliked: dislikedTracks,
+  });
 
   const nextRoundNumber = input.roundNumber + 1;
   const nextCandidates =
-    input.roundNumber < session.total_rounds ? selectRound(nextPool, seenKeys(session, rounds)) : [];
+    input.roundNumber < session.total_rounds ? selectRound(nextPool, seenKeys(session, rounds), { artistFeedback }) : [];
   // Finish early if the pool has run dry rather than show an empty round.
   const isFinalPick = nextCandidates.length === 0;
 
@@ -248,9 +301,16 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
       params: [sessionId, input.roundNumber, pickedTracksThisRound.map((track) => track.trackKey)],
     },
     {
-      text: `update sessions set candidate_pool = $3::jsonb, current_round = $4, status = $5
+      text: `update sessions set candidate_pool = $3::jsonb, current_round = $4, status = $5, artist_feedback = $6::jsonb
               where id = $1 and current_round = $2 and status = 'picking'`,
-      params: [sessionId, input.roundNumber, JSON.stringify(nextPool), nextRoundNumber, isFinalPick ? "complete" : "picking"],
+      params: [
+        sessionId,
+        input.roundNumber,
+        JSON.stringify(nextPool),
+        nextRoundNumber,
+        isFinalPick ? "complete" : "picking",
+        JSON.stringify(artistFeedback),
+      ],
     },
   ];
 
@@ -270,6 +330,7 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
       pool: nextPool,
       // Also covers sessions started before skipped songs were marked in the pool.
       excludedKeys: skippedKeys(rounds, requestedKeySet),
+      artistFeedback,
     });
     const playlistId = createId();
     statements.push(
@@ -309,16 +370,39 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
  * The rejected songs are marked in the pool so they never come back, in later
  * rounds or in the playlist.
  */
-export async function rerollRound(db: Db, sessionId: string, roundNumber: number): Promise<SessionState> {
+export type RerollInput = {
+  roundNumber: number;
+  /** Songs marked "Not for me" before swapping the round. */
+  dislikedKeys?: string[];
+};
+
+/**
+ * "None of these": swaps the round for unseen songs. The old ones are rejected
+ * for good. Songs marked "Not for me" also pull their similar songs down; the
+ * rest don't, since passing on a whole round says little about any one song.
+ */
+export async function rerollRound(deps: SessionDeps, sessionId: string, input: RerollInput): Promise<SessionState> {
+  const { db, musicSource } = deps;
+  const { roundNumber } = input;
   const { session, rounds } = await loadSession(db, sessionId);
   const round = rounds.find((candidateRound) => candidateRound.round_number === roundNumber);
   if (session.status !== "picking" || session.current_round !== roundNumber || !round || round.picked_track_keys) {
     throw new ApiError("conflict", "That round is no longer active. Refresh to see where you are.");
   }
+  const dislikedTracks = roundTracksFor(
+    round,
+    [...new Set(input.dislikedKeys ?? [])],
+    "One of the songs marked \"Not for me\" isn't one of this round's choices.",
+  );
 
-  const nextPool = rejectTracks(session.candidate_pool, round.candidates);
+  let scoredPool = session.candidate_pool;
+  for (const similarTracks of await lookupSimilar(db, musicSource, dislikedTracks)) {
+    scoredPool = subtractSimilarTracks(scoredPool, similarTracks, dislikeWeight(roundNumber));
+  }
+  const nextPool = rejectTracks(scoredPool, round.candidates);
+  const artistFeedback = updateArtistFeedback(session.artist_feedback, { disliked: dislikedTracks });
 
-  const nextCandidates = selectRound(nextPool, seenKeys(session, rounds));
+  const nextCandidates = selectRound(nextPool, seenKeys(session, rounds), { artistFeedback });
   if (nextCandidates.length === 0) {
     throw new ApiError("noSuggestions", "There are no more suggestions for this round. Pick one of these to keep going.");
   }
@@ -330,9 +414,9 @@ export async function rerollRound(db: Db, sessionId: string, roundNumber: number
       params: [sessionId, roundNumber, JSON.stringify(nextCandidates), JSON.stringify(round.candidates)],
     },
     {
-      text: `update sessions set candidate_pool = $3::jsonb
+      text: `update sessions set candidate_pool = $3::jsonb, artist_feedback = $4::jsonb
               where id = $1 and current_round = $2 and status = 'picking'`,
-      params: [sessionId, roundNumber, JSON.stringify(nextPool)],
+      params: [sessionId, roundNumber, JSON.stringify(nextPool), JSON.stringify(artistFeedback)],
     },
   ]);
   return getSessionState(db, sessionId);
