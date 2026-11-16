@@ -118,6 +118,8 @@ export type YoutubeQueue = {
 };
 
 export type YoutubeExport = {
+  /** Each playable song's YouTube video, in playlist order, for playing on the page. */
+  queue: Array<{ position: number; videoId: string }>;
   /** The playlist in its order. */
   inOrder: YoutubeQueue;
   /** The same songs in a random order. */
@@ -253,6 +255,7 @@ export async function exportPlaylistToYoutube(deps: ExportDeps, playlistId: stri
   ]);
 
   return {
+    queue: playableTracks.map((track) => ({ position: track.position, videoId: videoIdByKey.get(track.trackKey) as string })),
     inOrder,
     shuffled: shuffledQueue,
     trackCount: videoIds.length,

@@ -138,6 +138,9 @@ describe("exportPlaylistToYoutube", () => {
     expect(videoIds?.[0]).toBe(fakeVideoId(playlist.tracks[0].title));
     expect(videoIds).toHaveLength(49);
     expect(result.inOrder.youtubeMusicUrl).toBe(`https://music.youtube.com/watch?v=${videoIds?.[0]}&list=TLGGabc123`);
+    expect(result.queue.map((item) => item.videoId)).toEqual(videoIds);
+    expect(result.queue.map((item) => item.position)).not.toContain(4);
+    expect(result.queue[0]).toEqual({ position: 1, videoId: fakeVideoId(playlist.tracks[0].title) });
   });
 
   it("saves matches so the next export doesn't call the resolver for them", async () => {
