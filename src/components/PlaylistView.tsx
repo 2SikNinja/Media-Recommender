@@ -13,6 +13,7 @@ import {
   type Playlist,
   type YoutubeExport,
 } from "@/lib/apiClient";
+import { saveToHistory } from "@/lib/history";
 
 import { PreviewDisc } from "./PreviewDisc";
 import { PreviewPlayerProvider, usePreviewPlayer } from "./PreviewPlayer";
@@ -93,6 +94,23 @@ function PlaylistViewContent() {
       setExporting(null);
     }
   }
+
+  // Remember the playlist, so it can be found again from the home page.
+  useEffect(() => {
+    if (!playlist) return;
+    const seed = [...playlist.tracks, ...playlist.removedTracks].sort((a, b) => a.position - b.position)[0];
+    saveToHistory({
+      kind: "playlist",
+      sessionId: playlist.sessionId,
+      playlistId: playlist.playlistId,
+      title: playlist.title,
+      trackCount: playlist.tracks.length,
+      createdAt: playlist.createdAt,
+      seedArtist: seed?.artist ?? "",
+      seedTitle: seed?.title ?? "",
+      updatedAt: new Date().toISOString(),
+    });
+  }, [playlist]);
 
   // The undo prompt and edit errors go away on their own after a few seconds.
   useEffect(() => {
