@@ -23,8 +23,9 @@ const PreviewPlayerContext = createContext<PreviewPlayer | null>(null);
 /**
  * Plays 30-second previews through a single audio element, so starting one
  * song stops the last. Songs without a preview are remembered as unavailable.
+ * `onStart` runs when a preview starts, so other players on the page can pause.
  */
-export function PreviewPlayerProvider({ children }: { children: ReactNode }) {
+export function PreviewPlayerProvider({ children, onStart }: { children: ReactNode; onStart?: () => void }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   // Removes the error listener of the clip that's loading, so a later clip's
   // failure (or clearing the source) isn't blamed on it.
@@ -82,6 +83,7 @@ export function PreviewPlayerProvider({ children }: { children: ReactNode }) {
       }
 
       clearPendingRef.current();
+      onStart?.();
       audio.pause();
       audio.src = previewSrc(artist, title);
       setCurrentKey(trackKey);
@@ -107,7 +109,7 @@ export function PreviewPlayerProvider({ children }: { children: ReactNode }) {
         markUnavailable();
       });
     },
-    [currentKey, stop],
+    [currentKey, stop, onStart],
   );
 
   const statusOf = useCallback(

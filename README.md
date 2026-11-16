@@ -13,7 +13,8 @@ Pick a song you like. Pickify shows you 10 similar songs, you pick as many as yo
 - **Skips teach it too.** Songs you pass on push similar songs down, and a thumbs-down ("Not for me") pushes them down hard.
 - **"None of these"** swaps the round for 10 new songs, and the skipped ones never come back.
 - **Edit before you play.** Take songs out of the playlist and put them back.
-- **Open in YouTube Music** in order or shuffled, with every song matched to a YouTube upload.
+- **Play right on the page** with YouTube's official player: next, previous, shuffle, and tap any song to play from there.
+- **Open in YouTube Music** too, with every song matched to a YouTube upload.
 - **Your playlists** are listed on the home page, saved in the browser without an account.
 - **Share links** show the playlist's name and the seed song's record in iMessage, Discord, Slack and other apps.
 
@@ -114,7 +115,7 @@ All endpoints return JSON. Errors look like `{ "error": { "code": "conflict", "m
 | `GET` | `/api/preview?artist=&title=` | | Redirects to a 30-second preview clip (302), or 404 when there isn't one. Used directly as an audio source |
 | `GET` | `/api/playlists/:playlistId` | | `{ playlistId, sessionId, title, createdAt, tracks, removedTracks }`, songs in order |
 | `PATCH` | `/api/playlists/:playlistId/tracks/:position` | `{ removed: boolean }` | The updated playlist. Takes a song out, or puts it back in its place |
-| `POST` | `/api/playlists/:playlistId/export/youtube` | | `{ inOrder, shuffled, trackCount, unresolvedTracks }`, where `inOrder` and `shuffled` are each `{ youtubeUrl, youtubeMusicUrl }`. The playlist page calls this as soon as it opens, so Play and Shuffle play are ready before anyone taps |
+| `POST` | `/api/playlists/:playlistId/export/youtube` | | `{ queue, inOrder, shuffled, trackCount, unresolvedTracks }`. `queue` lists `{ position, videoId }` in playlist order for the on-page player; `inOrder` and `shuffled` are each `{ youtubeUrl, youtubeMusicUrl }`. The playlist page calls this as soon as it opens, so Play and Shuffle play are ready before anyone taps |
 
 **Session state** has the shape `{ sessionId, status, seed, currentRound, totalRounds, candidates, picks, playlistId }`. `candidates` holds the songs for the current round, and each song is `{ trackKey, artist, title, durationSeconds, imageUrl }`.
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle, Play, RotateCcw, Shuffle, X } from "lucide-react";
+import { AudioLines, ExternalLink, LoaderCircle, Play, RotateCcw, Shuffle, X } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -15,6 +15,7 @@ import {
 } from "@/lib/apiClient";
 import { saveToHistory } from "@/lib/history";
 
+import { PagePlayerProvider, PlayerDock, usePagePlayer, type QueueItem } from "./PagePlayer";
 import { PreviewDisc } from "./PreviewDisc";
 import { PreviewPlayerProvider, usePreviewPlayer } from "./PreviewPlayer";
 import { ShareButton } from "./ShareButton";
@@ -46,10 +47,28 @@ const toastSeconds = 6;
 
 export function PlaylistView() {
   return (
-    <PreviewPlayerProvider>
-      <PlaylistViewContent />
-    </PreviewPlayerProvider>
+    <PagePlayerProvider>
+      <PreviewWithPagePlayer>
+        <PlaylistViewContent />
+      </PreviewWithPagePlayer>
+    </PagePlayerProvider>
   );
+}
+
+/** Starting a 30-second preview pauses the page player, so they never play over each other. */
+function PreviewWithPagePlayer({ children }: { children: ReactNode }) {
+  const { pause } = usePagePlayer();
+  return <PreviewPlayerProvider onStart={pause}>{children}</PreviewPlayerProvider>;
+}
+
+/** Fisher-Yates shuffle, without changing the original. */
+function shuffledCopy<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const other = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[other]] = [copy[other], copy[index]];
+  }
+  return copy;
 }
 
 function PlaylistViewContent() {
@@ -67,6 +86,9 @@ function PlaylistViewContent() {
   const { stop: stopPreview } = usePreviewPlayer();
   const tracksKey = playlist ? playlist.tracks.map((track) => track.position).join(",") : null;
   const { ready: youtubeLinks, getLinks } = usePreparedYoutubeLinks(playlistId, tracksKey);
+  const pagePlayer = usePagePlayer();
+  // Set while a tap to play on the page waits for the songs to be found on YouTube.
+  const [waitingOnPage, setWaitingOnPage] = useState<ExportMode | null>(null);
 
   useEffect(() => {
     let isCurrent = true;
@@ -83,6 +105,36 @@ function PlaylistViewContent() {
       isCurrent = false;
     };
   }, [playlistId]);
+
+  /** The playlist's songs that YouTube has a video for, in playlist order. */
+  function queueFrom(links: YoutubeExport): QueueItem[] {
+    const trackByPosition = new Map(playlist?.tracks.map((track) => [track.position, track]));
+    return links.queue.flatMap(({ position, videoId }) => {
+      const track = trackByPosition.get(position);
+      return track ? [{ position, videoId, title: track.title, artist: track.artist }] : [];
+    });
+  }
+
+  /** Plays on the page, in order or shuffled, or from one song onwards. */
+  async function playOnPage(mode: ExportMode, fromPosition?: number) {
+    stopPreview();
+    setExportError(null);
+    setWaitingOnPage(mode);
+    try {
+      const queue = queueFrom(youtubeLinks ?? (await getLinks()));
+      if (queue.length === 0) throw new Error("None of these songs can be played right now.");
+      if (mode === "shuffled") {
+        pagePlayer.play(shuffledCopy(queue), { shuffled: true });
+      } else {
+        const startIndex = fromPosition === undefined ? 0 : queue.findIndex((item) => item.position === fromPosition);
+        pagePlayer.play(queue, { startIndex: Math.max(0, startIndex) });
+      }
+    } catch (error) {
+      setExportError(errorMessage(error));
+    } finally {
+      setWaitingOnPage(null);
+    }
+  }
 
   /** The links are ready, so the button is a plain link: note what was opened. */
   function onOpened(mode: ExportMode, links: YoutubeExport) {
@@ -178,9 +230,13 @@ function PlaylistViewContent() {
   // The seed is always the first song, even if it was taken out of the list.
   const seedTrack = [...playlist.tracks, ...playlist.removedTracks].sort((a, b) => a.position - b.position)[0];
   const canRemove = playlist.tracks.length > 1 && waiting === null;
+  const nowPlayingPosition = pagePlayer.queue?.[pagePlayer.currentIndex]?.position ?? null;
+  const playablePositions = youtubeLinks ? new Set(youtubeLinks.queue.map((item) => item.position)) : null;
+  const playerOpen = pagePlayer.queue !== null;
+  const pageButton = "inline-flex items-center gap-2 rounded-full px-6 py-3 font-medium disabled:opacity-70";
 
   return (
-    <section className="mx-auto w-full max-w-3xl pt-6 pb-20 sm:pt-10">
+    <section className={`mx-auto w-full max-w-3xl pt-6 sm:pt-10 ${playerOpen ? "pb-[24rem] sm:pb-20" : "pb-20"}`}>
       <div className="flex flex-col gap-6 sm:flex-row sm:items-end">
         {seedTrack && <PreviewDisc track={seedTrack} size={128} eager />}
         <div className="min-w-0">
@@ -194,27 +250,44 @@ function PlaylistViewContent() {
       </div>
 
       <div className="mt-8 flex flex-wrap gap-3">
+        <button
+          type="button"
+          onClick={() => void playOnPage("inOrder")}
+          disabled={waitingOnPage !== null}
+          aria-busy={waitingOnPage === "inOrder"}
+          className={`${pageButton} bg-accent text-on-accent hover:bg-accent-hover`}
+        >
+          {waitingOnPage === "inOrder" ? (
+            <LoaderCircle size={18} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Play size={18} fill="currentColor" aria-hidden="true" />
+          )}
+          {waitingOnPage === "inOrder" ? "Finding songs on YouTube…" : "Play"}
+        </button>
+        <button
+          type="button"
+          onClick={() => void playOnPage("shuffled")}
+          disabled={waitingOnPage !== null}
+          aria-busy={waitingOnPage === "shuffled"}
+          className={`${pageButton} border border-border hover:bg-surface`}
+        >
+          {waitingOnPage === "shuffled" ? (
+            <LoaderCircle size={18} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Shuffle size={18} aria-hidden="true" />
+          )}
+          Shuffle
+        </button>
         <PlayControl
           mode="inOrder"
           links={youtubeLinks}
           waiting={waiting}
           onOpened={onOpened}
           onPlayWhenReady={playWhenReady}
-          className="bg-accent text-on-accent hover:bg-accent-hover"
-          icon={<Play size={18} fill="currentColor" aria-hidden="true" />}
-          label="Play on YouTube Music"
-          waitingLabel="Finding songs on YouTube…"
-        />
-        <PlayControl
-          mode="shuffled"
-          links={youtubeLinks}
-          waiting={waiting}
-          onOpened={onOpened}
-          onPlayWhenReady={playWhenReady}
           className="border border-border hover:bg-surface"
-          icon={<Shuffle size={18} aria-hidden="true" />}
-          label="Shuffle play"
-          waitingLabel="Shuffle play"
+          icon={<ExternalLink size={18} aria-hidden="true" />}
+          label="Open in YouTube Music"
+          waitingLabel="Finding songs on YouTube…"
         />
         <ShareButton title={playlist.title} />
       </div>
@@ -268,12 +341,28 @@ function PlaylistViewContent() {
       <ol className="mt-10 flex flex-col">
         {playlist.tracks.map((track, index) => (
           <li key={track.position} className="group flex items-center gap-4 border-b border-border/60 py-3 last:border-b-0">
-            <span className="w-6 shrink-0 text-right text-sm text-text-secondary tabular-nums">{index + 1}</span>
-            <PreviewDisc track={track} size={40} eager={index < firstScreenTrackCount} />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-medium">{track.title}</span>
-              <span className="block truncate text-sm text-text-secondary">{track.artist}</span>
+            <span className="flex w-6 shrink-0 justify-end text-sm text-text-secondary tabular-nums">
+              {track.position === nowPlayingPosition ? (
+                <AudioLines size={16} className="text-accent" aria-label="Now playing" />
+              ) : (
+                index + 1
+              )}
             </span>
+            <PreviewDisc track={track} size={40} eager={index < firstScreenTrackCount} />
+            <button
+              type="button"
+              onClick={() => void playOnPage("inOrder", track.position)}
+              disabled={playablePositions !== null && !playablePositions.has(track.position)}
+              title={playablePositions !== null && !playablePositions.has(track.position) ? "Not found on YouTube" : "Play from here"}
+              className="min-w-0 flex-1 rounded-md text-left disabled:cursor-default"
+            >
+              <span className={`block truncate font-medium ${track.position === nowPlayingPosition ? "text-accent" : ""}`}>
+                {track.title}
+              </span>
+              <span className="block truncate text-sm text-text-secondary">
+                {pagePlayer.skippedPositions.has(track.position) ? "Can\u2019t play here. Try YouTube Music." : track.artist}
+              </span>
+            </button>
             {canRemove && (
               <button
                 type="button"
@@ -326,7 +415,10 @@ function PlaylistViewContent() {
         </div>
       )}
 
-      <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-5 z-10 flex justify-center px-5">
+      <div
+        aria-live="polite"
+        className={`pointer-events-none fixed inset-x-0 z-30 flex justify-center px-5 ${playerOpen ? "bottom-[23rem] sm:bottom-5" : "bottom-5"}`}
+      >
         {editError ? (
           <p role="alert" className="pointer-events-auto rounded-full border border-border bg-surface px-5 py-3 text-sm text-danger shadow-lg">
             {editError}
@@ -350,6 +442,10 @@ function PlaylistViewContent() {
       <Link href="/" className="mt-10 inline-block rounded-full border border-border px-5 py-2.5 font-medium hover:bg-surface">
         Start a new playlist
       </Link>
+
+      <PlayerDock
+        openOnYoutubeUrl={youtubeLinks ? queueUrl(pagePlayer.isShuffled ? youtubeLinks.shuffled : youtubeLinks.inOrder) : null}
+      />
     </section>
   );
 }
