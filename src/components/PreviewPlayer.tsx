@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { onPagePlayerStarted } from "@/lib/playbackEvents";
 import { effectiveLevel, useVolume } from "@/lib/volume";
 
 export function previewSrc(artist: string, title: string): string {
@@ -75,6 +76,9 @@ export function PreviewPlayerProvider({ children, onStart }: { children: ReactNo
       audioRef.current = null;
     };
   }, []);
+
+  // When the page player starts, by any means, a playing preview stops.
+  useEffect(() => onPagePlayerStarted(stop), [stop]);
 
   // Previews follow the site-wide volume. This runs after the effect above, so
   // the audio element exists and gets the saved volume as soon as it's made.

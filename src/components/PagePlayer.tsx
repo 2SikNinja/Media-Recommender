@@ -1,8 +1,19 @@
 "use client";
 
 import { ChevronDown, ExternalLink, LoaderCircle, Pause, Play, SkipBack, SkipForward, X } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
+import { announcePagePlayerStarted } from "@/lib/playbackEvents";
 import { useVolume, type Volume } from "@/lib/volume";
 
 import { VolumeControl } from "./VolumeControl";
@@ -20,6 +31,7 @@ type YoutubePlayer = {
   unMute: () => void;
   stopVideo: () => void;
   destroy: () => void;
+  getPlayerState: () => number;
 };
 
 type YoutubeNamespace = {
@@ -46,7 +58,12 @@ declare global {
 }
 
 // YT.PlayerState values.
-const playerState = { ended: 0, playing: 1, paused: 2, buffering: 3 } as const;
+const playerState = { unstarted: -1, ended: 0, playing: 1, paused: 2, buffering: 3, cued: 5 } as const;
+
+/** How often the dock re-checks YouTube's actual state, in case an event was missed. */
+const resyncIntervalMs = 1_000;
+/** How long a new song may sit unstarted before the dock offers a Play button (autoplay was blocked). */
+const autoplayGraceMs = 2_500;
 
 let apiPromise: Promise<YoutubeNamespace> | null = null;
 
@@ -122,6 +139,8 @@ export function PagePlayerProvider({ children }: { children: ReactNode }) {
   const volumeRef = useRef<Volume>(volume);
   const videoElementRef = useRef<HTMLDivElement | null>(null);
   const queueRef = useRef<QueueItem[] | null>(null);
+  // When the last queue was loaded, to tell "still starting" from "autoplay was blocked".
+  const loadedAtRef = useRef(0);
   // A queue asked for before the player was ready.
   const pendingRef = useRef<{ videoIds: string[]; startIndex: number } | null>(null);
 
@@ -129,6 +148,30 @@ export function PagePlayerProvider({ children }: { children: ReactNode }) {
     const index = playerRef.current?.getPlaylistIndex();
     if (typeof index === "number" && index >= 0) setCurrentIndex(index);
   }, []);
+
+  /**
+   * Updates what the dock shows from YouTube's actual state. Used for every
+   * state event and by a once-a-second check, so the dock can't stay wrong.
+   */
+  const syncFromState = useCallback(
+    (state: number) => {
+      syncIndex();
+      if (state === playerState.playing) setStatus("playing");
+      else if (state === playerState.paused) setStatus("paused");
+      else if (state === playerState.buffering) setStatus("loading");
+      else if (state === playerState.ended) {
+        const index = playerRef.current?.getPlaylistIndex() ?? -1;
+        if (index >= (queueRef.current?.length ?? 0) - 1) setStatus("ended");
+      } else if (
+        (state === playerState.unstarted || state === playerState.cued) &&
+        Date.now() - loadedAtRef.current > autoplayGraceMs
+      ) {
+        // The browser blocked autoplay: offer the Play button instead of spinning forever.
+        setStatus("paused");
+      }
+    },
+    [syncIndex],
+  );
 
   const createPlayer = useCallback(async () => {
     const youtube = await loadYoutubeApi();
@@ -148,14 +191,9 @@ export function PagePlayerProvider({ children }: { children: ReactNode }) {
           if (pending) playerRef.current?.loadPlaylist(pending.videoIds, pending.startIndex);
         },
         onStateChange: ({ data }) => {
-          syncIndex();
-          if (data === playerState.playing) setStatus("playing");
-          else if (data === playerState.paused) setStatus("paused");
-          else if (data === playerState.buffering) setStatus("loading");
-          else if (data === playerState.ended) {
-            const index = playerRef.current?.getPlaylistIndex() ?? -1;
-            if (index >= (queueRef.current?.length ?? 0) - 1) setStatus("ended");
-          }
+          syncFromState(data);
+          // Whatever started it (our buttons, Space, or YouTube's own controls), previews stop.
+          if (data === playerState.playing) announcePagePlayerStarted();
         },
         onError: () => {
           // The video is gone or its owner doesn't allow playing it on other
@@ -169,7 +207,7 @@ export function PagePlayerProvider({ children }: { children: ReactNode }) {
         },
       },
     });
-  }, [syncIndex]);
+  }, [syncFromState]);
 
   const play = useCallback<PagePlayer["play"]>(
     (nextQueue, { startIndex = 0, shuffled = false } = {}) => {
@@ -178,6 +216,7 @@ export function PagePlayerProvider({ children }: { children: ReactNode }) {
       setIsShuffled(shuffled);
       setCurrentIndex(startIndex);
       setStatus("loading");
+      loadedAtRef.current = Date.now();
       const videoIds = nextQueue.map((item) => item.videoId);
       if (playerRef.current) {
         playerRef.current.loadPlaylist(videoIds, startIndex);
@@ -198,10 +237,24 @@ export function PagePlayerProvider({ children }: { children: ReactNode }) {
   );
 
   const pause = useCallback(() => playerRef.current?.pauseVideo(), []);
+  // Decides from what YouTube is actually doing, not from what the dock shows.
   const togglePause = useCallback(() => {
-    if (status === "playing") playerRef.current?.pauseVideo();
-    else playerRef.current?.playVideo();
-  }, [status]);
+    const player = playerRef.current;
+    if (!player) return;
+    const state = player.getPlayerState();
+    if (state === playerState.playing || state === playerState.buffering) player.pauseVideo();
+    else player.playVideo();
+  }, []);
+
+  // While a queue is open, re-check YouTube's state every second.
+  useEffect(() => {
+    if (!queue) return;
+    const timer = setInterval(() => {
+      const player = playerRef.current;
+      if (player && typeof player.getPlayerState === "function") syncFromState(player.getPlayerState());
+    }, resyncIntervalMs);
+    return () => clearInterval(timer);
+  }, [queue, syncFromState]);
   const next = useCallback(() => playerRef.current?.nextVideo(), []);
   const previous = useCallback(() => playerRef.current?.previousVideo(), []);
   const close = useCallback(() => {
@@ -255,6 +308,50 @@ export function PlayerDock({ openOnYoutubeUrl }: { openOnYoutubeUrl: string | nu
   const { queue, currentIndex, status, isShuffled, togglePause, next, previous, close, setVideoElement, pause } =
     usePagePlayer();
   const [collapsed, setCollapsed] = useState(false);
+  const isOpen = queue !== null;
+
+  /**
+   * Space plays and pauses while the player is open, the way it does on other
+   * music sites. Without this, Space presses whatever button was clicked last,
+   * like a preview or a Play button. Ignored while typing, and when focus is
+   * inside YouTube's own player (which handles Space itself).
+   */
+  const onSpace = useEffectEvent((event: KeyboardEvent) => {
+    if (collapsed) setCollapsed(false);
+    event.preventDefault();
+    togglePause();
+  });
+  useEffect(() => {
+    if (!isOpen) return;
+    let handled = false;
+    const isSpace = (event: KeyboardEvent) =>
+      (event.code === "Space" || event.key === " ") && !event.ctrlKey && !event.metaKey && !event.altKey;
+    const isTyping = (target: EventTarget | null) =>
+      target instanceof HTMLElement &&
+      target.closest("input:not([type=range]), textarea, select, [contenteditable='true']") !== null;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isSpace(event) || isTyping(event.target)) return;
+      handled = true;
+      if (event.repeat) {
+        event.preventDefault();
+        return;
+      }
+      onSpace(event);
+    };
+    // Browsers press a focused button when Space is released, so swallow that too.
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (!isSpace(event) || !handled) return;
+      handled = false;
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [isOpen]);
+
   if (!queue) return null;
 
   const current = queue[currentIndex];
