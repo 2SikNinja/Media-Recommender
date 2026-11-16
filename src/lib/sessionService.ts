@@ -2,8 +2,8 @@ import { ApiError } from "./apiErrors";
 import {
   addSimilarTracks,
   buildPlaylist,
-  penalizeSkipped,
   pickWeight,
+  rejectSkipped,
   rejectTracks,
   selectRound,
   type CandidatePool,
@@ -76,6 +76,18 @@ function pickedTracks(rounds: RoundRow[]): Track[] {
     const pickedKeys = new Set(round.picked_track_keys ?? []);
     return round.candidates.filter((track) => pickedKeys.has(track.trackKey));
   });
+}
+
+/** Every song shown in a round and not picked, including this round's (whose picks aren't saved yet). */
+function skippedKeys(rounds: RoundRow[], pickedThisRound: Set<string>): Set<string> {
+  const skipped = new Set<string>();
+  for (const round of rounds) {
+    const picked = round.picked_track_keys === null ? pickedThisRound : new Set(round.picked_track_keys);
+    for (const track of round.candidates) {
+      if (!picked.has(track.trackKey)) skipped.add(track.trackKey);
+    }
+  }
+  return skipped;
 }
 
 function sameKeys(first: string[], second: string[]): boolean {
@@ -221,8 +233,7 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
       poolWithPicks = addSimilarTracks(poolWithPicks, similarTracks, pickWeight(input.roundNumber));
     }
   }
-  const shownKeys = round.candidates.map((track) => track.trackKey);
-  const nextPool = penalizeSkipped(poolWithPicks, shownKeys, requestedKeys);
+  const nextPool = rejectSkipped(poolWithPicks, round.candidates, requestedKeys);
 
   const nextRoundNumber = input.roundNumber + 1;
   const nextCandidates =
@@ -253,7 +264,13 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
     });
   } else {
     const seed = seedFromRow(session);
-    const playlistTracks = buildPlaylist({ seed, picks: [...pickedTracks(rounds), ...pickedTracksThisRound], pool: nextPool });
+    const playlistTracks = buildPlaylist({
+      seed,
+      picks: [...pickedTracks(rounds), ...pickedTracksThisRound],
+      pool: nextPool,
+      // Also covers sessions started before skipped songs were marked in the pool.
+      excludedKeys: skippedKeys(rounds, requestedKeySet),
+    });
     const playlistId = createId();
     statements.push(
       {

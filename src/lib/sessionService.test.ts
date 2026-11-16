@@ -220,6 +220,50 @@ describe("submitPick with several songs", () => {
   });
 });
 
+describe("songs passed on in a round", () => {
+  it("never end up in the playlist", async () => {
+    let state = await createSession(deps, seedInput);
+    const skippedKeys = new Set<string>();
+    while (state.status === "picking") {
+      const [picked, ...skipped] = state.candidates;
+      for (const track of skipped) skippedKeys.add(track.trackKey);
+      state = await submitPick(deps, state.sessionId, { roundNumber: state.currentRound as number, trackKeys: [picked.trackKey] });
+    }
+
+    const playlistKeys = await db.query<{ track_key: string }>(
+      "select track_key from playlist_tracks where playlist_id = $1",
+      [state.playlistId],
+    );
+    expect(skippedKeys.size).toBe(45);
+    expect(playlistKeys).toHaveLength(50);
+    expect(playlistKeys.filter((row) => skippedKeys.has(row.track_key))).toEqual([]);
+  });
+
+  it("stay out of the playlist for sessions started before they were marked as passed on", async () => {
+    let state = await createSession(deps, seedInput);
+    const firstRoundSkipped = state.candidates.slice(1).map((track) => track.trackKey);
+    state = await pickFirst(state);
+
+    // Older sessions only lowered skipped songs' scores. Undo the mark to imitate one.
+    const [{ candidate_pool: pool }] = await db.query<{ candidate_pool: Record<string, { rejected?: boolean; score: number }> }>(
+      "select candidate_pool from sessions where id = $1",
+      [state.sessionId],
+    );
+    for (const key of firstRoundSkipped) {
+      delete pool[key].rejected;
+      pool[key].score = 100;
+    }
+    await db.query("update sessions set candidate_pool = $2::jsonb where id = $1", [state.sessionId, JSON.stringify(pool)]);
+
+    while (state.status === "picking") state = await pickFirst(state);
+    const playlistKeys = await db.query<{ track_key: string }>(
+      "select track_key from playlist_tracks where playlist_id = $1",
+      [state.playlistId],
+    );
+    expect(playlistKeys.filter((row) => firstRoundSkipped.includes(row.track_key))).toEqual([]);
+  });
+});
+
 describe("rerollRound", () => {
   it("replaces the round with unseen songs and keeps rejected songs out of the playlist", async () => {
     const state = await createSession(deps, seedInput);

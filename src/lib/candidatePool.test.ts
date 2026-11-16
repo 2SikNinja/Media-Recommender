@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   addSimilarTracks,
   buildPlaylist,
-  penalizeSkipped,
   pickWeight,
+  rejectSkipped,
   rejectTracks,
   selectRound,
   type CandidatePool,
@@ -94,17 +94,25 @@ describe("selectRound", () => {
   });
 });
 
-describe("penalizeSkipped", () => {
-  it("lowers skipped songs but not the pick", () => {
+describe("rejectSkipped", () => {
+  it("rejects the songs shown but not picked, and leaves the picks alone", () => {
     const pool = addSimilarTracks({}, [makeSimilar("A", "Picked", 1), makeSimilar("B", "Skipped", 1)]);
-    const pickedKey = makeTrackKey("A", "Picked");
-    const skippedKey = makeTrackKey("B", "Skipped");
+    const picked = makeTrack("A", "Picked");
+    const skipped = makeTrack("B", "Skipped");
 
-    const penalizedPool = penalizeSkipped(pool, [pickedKey, skippedKey, "missing::key"], [pickedKey], 0.5);
+    const nextPool = rejectSkipped(pool, [picked, skipped], [picked.trackKey]);
 
-    expect(penalizedPool[pickedKey].score).toBe(1);
-    expect(penalizedPool[skippedKey].score).toBe(0.5);
-    expect(penalizedPool["missing::key"]).toBeUndefined();
+    expect(nextPool[picked.trackKey].rejected).toBeUndefined();
+    expect(nextPool[skipped.trackKey]).toMatchObject({ rejected: true, score: 1 });
+  });
+
+  it("keeps skipped songs out even when a later pick suggests them again", () => {
+    const skipped = makeTrack("B", "Skipped");
+    let pool = rejectSkipped(addSimilarTracks({}, [makeSimilar("B", "Skipped", 1)]), [skipped], []);
+    pool = addSimilarTracks(pool, [makeSimilar("B", "Skipped", 1), makeSimilar("C", "Unseen", 0.1)], 2);
+
+    const playlist = buildPlaylist({ seed: makeTrack("Seed", "Song"), picks: [], pool });
+    expect(playlist.map((track) => track.title)).toEqual(["Song", "Unseen"]);
   });
 });
 
@@ -130,14 +138,21 @@ describe("buildPlaylist", () => {
     expect(playlist).toHaveLength(11);
   });
 
-  it("ranks songs the user skipped below songs they never saw", () => {
-    const pool = addSimilarTracks({}, [makeSimilar("A", "Skipped", 1), makeSimilar("B", "Unseen", 0.8)]);
-    const skippedKey = makeTrackKey("A", "Skipped");
-    const penalizedPool = penalizeSkipped(pool, [skippedKey], ["other::key"]);
+  it("leaves out excluded songs, even when the pool still ranks them", () => {
+    const pool = addSimilarTracks({}, [makeSimilar("A", "Skipped earlier", 1), makeSimilar("B", "Unseen", 0.2)]);
+    const playlist = buildPlaylist({
+      seed: makeTrack("Seed", "Song"),
+      picks: [],
+      pool,
+      excludedKeys: [makeTrackKey("A", "Skipped earlier")],
+    });
+    expect(playlist.map((track) => track.title)).toEqual(["Song", "Unseen"]);
+  });
 
-    const playlist = buildPlaylist({ seed: makeTrack("Seed", "Song"), picks: [], pool: penalizedPool, size: 2 });
-
-    expect(playlist[1].title).toBe("Unseen");
+  it("is shorter rather than padded when only excluded songs are left", () => {
+    const pool = makePool(30, 30);
+    const excludedKeys = Object.keys(pool).slice(0, 25);
+    expect(buildPlaylist({ seed: makeTrack("Seed", "Song"), picks: [], pool, excludedKeys })).toHaveLength(6);
   });
 });
 

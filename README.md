@@ -88,8 +88,8 @@ docs/screenshots/     Images for this README
 1. Last.fm's `track.getSimilar` returns songs similar to the seed, each with a similarity score from 0 to 1.
 2. Those songs go into a **candidate pool**. When a song shows up as similar to more than one of your picks, its scores add up, so it rises to the top.
 3. Each round shows the 10 highest-scoring songs you haven't seen yet, with at most 2 per artist.
-4. The similar songs for each song you picked are merged into the pool. Later picks count a little more than earlier ones, and songs you skipped are scored lower.
-5. The final playlist is the seed and your picks first, then the best songs left in the pool, up to 50 with at most 3 per artist.
+4. The similar songs for each song you picked are merged into the pool. Later picks count a little more than earlier ones. Songs you were shown and didn't pick are passed on for good, like "None of these".
+5. The final playlist is the seed and your picks first, then the best songs left in the pool that you never passed on, up to 50 with at most 3 per artist. If the pool runs short, the playlist is shorter rather than padded with songs you skipped.
 
 The logic lives in `src/lib/candidatePool.ts`.
 

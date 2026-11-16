@@ -14,7 +14,11 @@ export type PoolEntry = {
   score: number;
   /** How many seed or picked songs listed this one as similar. */
   hits: number;
-  /** Set when the user rerolled past this song. It stays out of rounds and the playlist for good. */
+  /**
+   * Set when the user passed on this song: it was shown in a round and not
+   * picked, or swapped out with "none of these". It stays out of later rounds
+   * and the playlist for good.
+   */
   rejected?: boolean;
 };
 
@@ -24,7 +28,6 @@ export const defaultRoundSize = 10;
 export const defaultPlaylistSize = 50;
 const defaultRoundArtistLimit = 2;
 const defaultPlaylistArtistLimit = 3;
-const defaultSkippedPenalty = 0.6;
 
 /** Later picks reflect the user's taste better than the seed, so they count a bit more. */
 export function pickWeight(roundNumber: number): number {
@@ -53,24 +56,12 @@ export function addSimilarTracks(pool: CandidatePool, similarTracks: SimilarTrac
 }
 
 /**
- * Lowers the score of songs that were shown in a round but not picked. They are
- * already excluded from later rounds, so this only matters for the final playlist.
+ * Marks the songs shown in a round but not picked as rejected, so they stay
+ * out of the playlist. Passing on a song is a clear "not this one".
  */
-export function penalizeSkipped(
-  pool: CandidatePool,
-  shownKeys: string[],
-  pickedKeys: Iterable<string>,
-  penalty = defaultSkippedPenalty,
-): CandidatePool {
+export function rejectSkipped(pool: CandidatePool, shownTracks: Track[], pickedKeys: Iterable<string>): CandidatePool {
   const picked = new Set(pickedKeys);
-  const nextPool: CandidatePool = { ...pool };
-  for (const shownKey of shownKeys) {
-    const entry = nextPool[shownKey];
-    if (!picked.has(shownKey) && entry) {
-      nextPool[shownKey] = { ...entry, score: entry.score * penalty };
-    }
-  }
-  return nextPool;
+  return rejectTracks(pool, shownTracks.filter((track) => !picked.has(track.trackKey)));
 }
 
 /**
@@ -151,24 +142,30 @@ export type BuildPlaylistInput = {
   seed: Track;
   picks: Track[];
   pool: CandidatePool;
+  /** Songs to leave out even if the pool still ranks them, such as songs passed on in earlier rounds. */
+  excludedKeys?: Iterable<string>;
   size?: number;
   maxPerArtist?: number;
 };
 
 /**
  * The final playlist: the seed and every pick first, then the best-scoring songs
- * from the pool. Uses the same artist limit and fallback as selectRound.
+ * from the pool that the user never passed on. Uses the same artist limit and
+ * fallback as selectRound. When the pool runs short, the playlist is shorter
+ * rather than padded with songs the user didn't want.
  */
 export function buildPlaylist({
   seed,
   picks,
   pool,
+  excludedKeys = [],
   size = defaultPlaylistSize,
   maxPerArtist = defaultPlaylistArtistLimit,
 }: BuildPlaylistInput): Track[] {
   const playlist: Track[] = [];
   const usedKeys = new Set<string>();
   const artistCounts = new Map<string, number>();
+  const leftOut = new Set(excludedKeys);
 
   for (const track of [seed, ...picks]) {
     if (playlist.length >= size || usedKeys.has(track.trackKey)) continue;
@@ -178,7 +175,7 @@ export function buildPlaylist({
     artistCounts.set(artistKey, (artistCounts.get(artistKey) ?? 0) + 1);
   }
 
-  const rankedEntries = rankEntries(pool);
+  const rankedEntries = rankEntries(pool).filter((entry) => !leftOut.has(entry.track.trackKey));
   playlist.push(...takeWithArtistLimit(rankedEntries, size - playlist.length, usedKeys, artistCounts, maxPerArtist));
   if (playlist.length < size) {
     playlist.push(...takeWithArtistLimit(rankedEntries, size - playlist.length, usedKeys, artistCounts, Infinity));
