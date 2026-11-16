@@ -1,10 +1,13 @@
 import { toErrorResponse } from "@/lib/apiErrors";
 import { searchQuerySchema } from "@/lib/apiSchemas";
+import { getDb } from "@/lib/db";
 import { searchTracks } from "@/lib/lastfm";
+import { enforceRateLimit } from "@/lib/rateLimit";
 
 /** GET /api/tracks/search?q=believe: songs to pick a seed from. */
 export async function GET(request: Request) {
   try {
+    await enforceRateLimit(getDb(), request, "search");
     const { q } = searchQuerySchema.parse({ q: new URL(request.url).searchParams.get("q") ?? "" });
     const tracks = await searchTracks(q, 10);
     return Response.json(
