@@ -24,12 +24,16 @@ export type Playlist = {
   sessionId: string;
   title: string;
   createdAt: string;
+  /** The songs that will play, in order. */
   tracks: PlaylistTrack[];
+  /** Songs taken out of the playlist, which can be put back. */
+  removedTracks: PlaylistTrack[];
 };
 
 type PlaylistRow = { id: string; session_id: string; title: string; created_at: Date | string };
 type PlaylistTrackRow = {
   position: number;
+  is_removed: boolean;
   track_key: string;
   artist: string;
   title: string;
@@ -40,7 +44,7 @@ export async function getPlaylist(db: Db, playlistId: string): Promise<Playlist>
   const [playlistRows, trackRows] = await Promise.all([
     db.query<PlaylistRow>("select id, session_id, title, created_at from playlists where id = $1", [playlistId]),
     db.query<PlaylistTrackRow>(
-      `select position, track_key, artist, title, youtube_video_id
+      `select position, track_key, artist, title, youtube_video_id, removed_at is not null as is_removed
          from playlist_tracks where playlist_id = $1 order by position`,
       [playlistId],
     ),
@@ -54,14 +58,56 @@ export async function getPlaylist(db: Db, playlistId: string): Promise<Playlist>
     sessionId: playlist.session_id,
     title: playlist.title,
     createdAt: new Date(playlist.created_at).toISOString(),
-    tracks: trackRows.map((row) => ({
-      position: row.position,
-      trackKey: row.track_key,
-      artist: row.artist,
-      title: row.title,
-      youtubeVideoId: row.youtube_video_id,
-    })),
+    tracks: trackRows.filter((row) => !row.is_removed).map(toPlaylistTrack),
+    removedTracks: trackRows.filter((row) => row.is_removed).map(toPlaylistTrack),
   };
+}
+
+function toPlaylistTrack(row: PlaylistTrackRow): PlaylistTrack {
+  return {
+    position: row.position,
+    trackKey: row.track_key,
+    artist: row.artist,
+    title: row.title,
+    youtubeVideoId: row.youtube_video_id,
+  };
+}
+
+/**
+ * Takes a song out of the playlist, or puts it back in its original place.
+ * Doing either twice is harmless. The last song can't be removed, so there's
+ * always something to play.
+ */
+export async function setTrackRemoved(db: Db, playlistId: string, position: number, removed: boolean): Promise<Playlist> {
+  // Lock the playlist first, so two removals at once can't both take the last song.
+  const [, rows] = await db.transaction([
+    { text: "select 1 from playlists where id = $1 for update", params: [playlistId] },
+    {
+      text: `with target as (
+       select position from playlist_tracks where playlist_id = $1 and position = $2
+     ), updated as (
+       update playlist_tracks
+          set removed_at = case when $3::boolean then coalesce(removed_at, now()) else null end
+        where playlist_id = $1 and position = $2
+          and (not $3::boolean
+               or (select count(*) from playlist_tracks
+                    where playlist_id = $1 and removed_at is null and position <> $2) > 0)
+        returning 1
+     )
+     select exists (select 1 from target) as found, exists (select 1 from updated) as updated`,
+      params: [playlistId, position, removed],
+    },
+  ]);
+  const result = rows[0] as { found: boolean; updated: boolean } | undefined;
+  if (!result?.found) {
+    // Either the playlist or the position doesn't exist; getPlaylist says which.
+    await getPlaylist(db, playlistId);
+    throw new ApiError("notFound", "That song isn't in this playlist.");
+  }
+  if (!result.updated) {
+    throw new ApiError("conflict", "A playlist needs at least one song.");
+  }
+  return getPlaylist(db, playlistId);
 }
 
 export type YoutubeExport = {

@@ -30,7 +30,7 @@ afterAll(async () => {
 
 describe("runMigrations", () => {
   it("applies the real migrations once and skips them on the next run", async () => {
-    expect(await runMigrations(client)).toEqual(["0001_init.sql", "0002_multiple_picks.sql", "0003_album_art.sql"]);
+    expect(await runMigrations(client)).toEqual(["0001_init.sql", "0002_multiple_picks.sql", "0003_album_art.sql", "0004_remove_playlist_tracks.sql"]);
     expect(await runMigrations(client)).toEqual([]);
 
     const tables = await client.query(
