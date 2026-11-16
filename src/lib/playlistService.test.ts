@@ -4,7 +4,7 @@ import { createFakeMusicSource } from "@/test/fakeMusicSource";
 import { createTestDb } from "@/test/pgliteDb";
 
 import type { Db } from "./dbTypes";
-import { exportPlaylistToYoutube, getPlaylist } from "./playlistService";
+import { exportPlaylistToYoutube, getPlaylist, setTrackRemoved } from "./playlistService";
 import { ResolverError, type ResolvedTrack, type Resolver } from "./resolverClient";
 import { createSession, submitPick } from "./sessionService";
 
@@ -68,6 +68,56 @@ describe("getPlaylist", () => {
 
   it("returns notFound for an unknown playlist", async () => {
     await expect(getPlaylist(db, crypto.randomUUID())).rejects.toMatchObject({ code: "notFound" });
+  });
+});
+
+describe("setTrackRemoved", () => {
+  it("takes a song out and puts it back in its original place", async () => {
+    const before = await getPlaylist(db, playlistId);
+    const removedTrack = before.tracks[4];
+
+    const afterRemove = await setTrackRemoved(db, playlistId, removedTrack.position, true);
+    expect(afterRemove.tracks).toHaveLength(49);
+    expect(afterRemove.tracks.map((track) => track.trackKey)).not.toContain(removedTrack.trackKey);
+    expect(afterRemove.removedTracks).toEqual([removedTrack]);
+
+    const afterRestore = await setTrackRemoved(db, playlistId, removedTrack.position, false);
+    expect(afterRestore.tracks).toEqual(before.tracks);
+    expect(afterRestore.removedTracks).toEqual([]);
+  });
+
+  it("is harmless to repeat", async () => {
+    await setTrackRemoved(db, playlistId, 3, true);
+    const again = await setTrackRemoved(db, playlistId, 3, true);
+    expect(again.tracks).toHaveLength(49);
+    expect(again.removedTracks).toHaveLength(1);
+    await expect(setTrackRemoved(db, playlistId, 7, false)).resolves.toMatchObject({ removedTracks: [{ position: 3 }] });
+  });
+
+  it("won't remove the last song", async () => {
+    for (let position = 1; position < 50; position += 1) {
+      await setTrackRemoved(db, playlistId, position, true);
+    }
+    await expect(setTrackRemoved(db, playlistId, 50, true)).rejects.toMatchObject({ code: "conflict" });
+    expect((await getPlaylist(db, playlistId)).tracks).toHaveLength(1);
+  });
+
+  it("returns notFound for an unknown playlist or position", async () => {
+    await expect(setTrackRemoved(db, crypto.randomUUID(), 1, true)).rejects.toMatchObject({ code: "notFound" });
+    await expect(setTrackRemoved(db, playlistId, 51, true)).rejects.toMatchObject({ code: "notFound" });
+  });
+
+  it("leaves removed songs out of the YouTube queue", async () => {
+    const playlist = await getPlaylist(db, playlistId);
+    await setTrackRemoved(db, playlistId, 2, true);
+    const resolver = createFakeResolver();
+    const result = await exportPlaylistToYoutube(
+      { db, resolver, fetchImpl: fakeYoutubeFetch(null) },
+      playlistId,
+      { shuffle: false },
+    );
+    expect(result.trackCount).toBe(49);
+    expect(result.youtubeUrl).not.toContain(fakeVideoId(playlist.tracks[1].title));
   });
 });
 

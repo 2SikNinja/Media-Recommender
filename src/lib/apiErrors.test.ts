@@ -47,3 +47,12 @@ describe("readJsonBody", () => {
     await expect(readJsonBody(request)).rejects.toMatchObject({ code: "invalidRequest" });
   });
 });
+
+describe("rate limit responses", () => {
+  it("sends 429 with Retry-After", async () => {
+    const response = toErrorResponse(new ApiError("rateLimited", "Slow down.", { retryAfterSeconds: 12 }), "test");
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("12");
+    expect(await response.json()).toEqual({ error: { code: "rateLimited", message: "Slow down." } });
+  });
+});

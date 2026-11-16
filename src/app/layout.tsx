@@ -18,6 +18,8 @@ const bricolage = Bricolage_Grotesque({
 export const metadata: Metadata = {
   title: "Pickify",
   description: "Start with one song, pick your favorites, and get a 50-song playlist to play on YouTube Music.",
+  openGraph: { siteName: "Pickify", type: "website" },
+  twitter: { card: "summary_large_image" },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

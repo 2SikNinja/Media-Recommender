@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
 import { ApiClientError, errorMessage, getSession, rerollRound, submitPick, type SessionState } from "@/lib/apiClient";
+import { saveToHistory } from "@/lib/history";
 
 import { PreviewPlayerProvider, usePreviewPlayer } from "./PreviewPlayer";
 import { preloadAlbumArt } from "./RecordArt";
@@ -57,6 +58,20 @@ function RoundPickerContent() {
       isCurrent = false;
     };
   }, [sessionId, router]);
+
+  // Remember the unfinished session, so it can be picked up again from the home page.
+  useEffect(() => {
+    if (!session || session.currentRound === null) return;
+    saveToHistory({
+      kind: "session",
+      sessionId: session.sessionId,
+      seedArtist: session.seed.artist,
+      seedTitle: session.seed.title,
+      round: session.currentRound,
+      totalRounds: session.totalRounds,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [session]);
 
   if (loadError) {
     return (
