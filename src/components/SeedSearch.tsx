@@ -74,7 +74,7 @@ export function SeedSearch() {
         Start with one song.
       </h1>
       <p className="mt-5 max-w-xl text-lg text-pretty text-text-secondary">
-        Pick your favorite out of 10 similar songs, five times over. Your picks become a 50-song playlist you can play on
+        Pick your favorites from 10 similar songs, five times over. Your picks become a 50-song playlist you can play on
         YouTube Music.
       </p>
 
