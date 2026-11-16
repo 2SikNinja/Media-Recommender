@@ -9,6 +9,7 @@ export type ApiErrorCode =
   | "notFound"
   | "conflict"
   | "noSuggestions"
+  | "rateLimited"
   | "upstreamUnavailable"
   | "internalError";
 
@@ -17,6 +18,7 @@ const statusByCode: Record<ApiErrorCode, number> = {
   notFound: 404,
   conflict: 409,
   noSuggestions: 422,
+  rateLimited: 429,
   upstreamUnavailable: 503,
   internalError: 500,
 };
@@ -24,16 +26,19 @@ const statusByCode: Record<ApiErrorCode, number> = {
 /** An error that is safe to show to the user, with a stable code for the frontend. */
 export class ApiError extends Error {
   readonly code: ApiErrorCode;
+  /** For rateLimited: when the client can try again, sent as Retry-After. */
+  readonly retryAfterSeconds?: number;
 
-  constructor(code: ApiErrorCode, message: string) {
+  constructor(code: ApiErrorCode, message: string, options: { retryAfterSeconds?: number } = {}) {
     super(message);
     this.name = "ApiError";
     this.code = code;
+    this.retryAfterSeconds = options.retryAfterSeconds;
   }
 }
 
-function errorResponse(code: ApiErrorCode, message: string): Response {
-  return Response.json({ error: { code, message } }, { status: statusByCode[code] });
+function errorResponse(code: ApiErrorCode, message: string, headers?: HeadersInit): Response {
+  return Response.json({ error: { code, message } }, { status: statusByCode[code], headers });
 }
 
 /**
@@ -47,7 +52,8 @@ function errorResponse(code: ApiErrorCode, message: string): Response {
 export function toErrorResponse(error: unknown, context: string): Response {
   unstable_rethrow(error);
   if (error instanceof ApiError) {
-    return errorResponse(error.code, error.message);
+    const headers = error.retryAfterSeconds ? { "Retry-After": String(error.retryAfterSeconds) } : undefined;
+    return errorResponse(error.code, error.message, headers);
   }
   if (error instanceof ZodError) {
     const firstIssue = error.issues[0];
@@ -60,7 +66,7 @@ export function toErrorResponse(error: unknown, context: string): Response {
   }
   if (error instanceof DeezerError) {
     console.error(`[${context}] Deezer error`, error.message);
-    return errorResponse("upstreamUnavailable", "Album art isn't available right now.");
+    return errorResponse("upstreamUnavailable", "Covers and previews aren't available right now.");
   }
   console.error(`[${context}] unexpected error`, error);
   return errorResponse("internalError", "Something went wrong on our end. Try again.");

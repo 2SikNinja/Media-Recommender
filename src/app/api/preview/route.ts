@@ -1,6 +1,8 @@
 import { toErrorResponse } from "@/lib/apiErrors";
 import { trackQuerySchema } from "@/lib/apiSchemas";
+import { getDb } from "@/lib/db";
 import { findPreviewUrl, previewCacheSeconds } from "@/lib/deezer";
+import { enforceRateLimit } from "@/lib/rateLimit";
 
 const missingCacheControl = "public, max-age=3600, s-maxage=86400";
 
@@ -12,6 +14,7 @@ const missingCacheControl = "public, max-age=3600, s-maxage=86400";
  */
 export async function GET(request: Request) {
   try {
+    await enforceRateLimit(getDb(), request, "media");
     const searchParams = new URL(request.url).searchParams;
     const { artist, title } = trackQuerySchema.parse({
       artist: searchParams.get("artist") ?? "",
