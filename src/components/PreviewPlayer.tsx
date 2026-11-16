@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { effectiveLevel, useVolume } from "@/lib/volume";
+
 export function previewSrc(artist: string, title: string): string {
   return `/api/preview?${new URLSearchParams({ artist, title }).toString()}`;
 }
@@ -34,6 +36,7 @@ export function PreviewPlayerProvider({ children, onStart }: { children: ReactNo
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [unavailableKeys, setUnavailableKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const volume = useVolume();
 
   const stop = useCallback(() => {
     clearPendingRef.current();
@@ -72,6 +75,12 @@ export function PreviewPlayerProvider({ children, onStart }: { children: ReactNo
       audioRef.current = null;
     };
   }, []);
+
+  // Previews follow the site-wide volume. This runs after the effect above, so
+  // the audio element exists and gets the saved volume as soon as it's made.
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = effectiveLevel(volume);
+  }, [volume]);
 
   const toggle = useCallback<PreviewPlayer["toggle"]>(
     ({ trackKey, artist, title }) => {
