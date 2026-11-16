@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { unstable_rethrow } from "next/navigation";
+
 import { ApiError } from "./apiErrors";
 import type { Db } from "./dbTypes";
 
@@ -56,6 +58,9 @@ export async function enforceRateLimit(
   bucket: RateLimitBucket,
   options: { now?: Date; random?: () => number } = {},
 ): Promise<void> {
+  // Read first and outside the try: during prerendering, reading headers throws
+  // Next.js's signal that the route is dynamic, which must not be caught.
+  const clientKey = clientKeyFor(request);
   const { limit, windowSeconds } = rateLimits[bucket];
   const now = options.now ?? new Date();
   const random = options.random ?? Math.random;
@@ -71,12 +76,13 @@ export async function enforceRateLimit(
        )
        select hits, ceil(extract(epoch from window_start + make_interval(secs => $3) - $4::timestamptz))::int as retry_after
          from hit`,
-      [bucket, clientKeyFor(request), windowSeconds, now.toISOString()],
+      [bucket, clientKey, windowSeconds, now.toISOString()],
     );
     if (random() < 1 / cleanupEvery) {
       await db.query("delete from rate_limit_hits where window_start < $1::timestamptz - interval '1 hour'", [now.toISOString()]);
     }
   } catch (error) {
+    unstable_rethrow(error);
     console.error(`[rateLimit:${bucket}] couldn't check the limit, allowing the request`, error);
     return;
   }
