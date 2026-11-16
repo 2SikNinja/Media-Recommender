@@ -42,3 +42,9 @@ export const playlistPositionSchema = z.coerce.number().int().min(1).max(50);
 export const trackRemovalSchema = z.object({
   removed: z.boolean(),
 });
+
+export const clientErrorSchema = z.object({
+  message: z.string().trim().min(1).max(500),
+  digest: z.string().max(100).optional(),
+  path: z.string().max(300),
+});

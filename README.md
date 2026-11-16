@@ -217,6 +217,21 @@ Pushing to `master` deploys both Vercel projects:
 
 Pull requests get preview deployments of the app that use the `dev` database. To check that the deployed resolver can still reach YouTube, call `/health/youtube` on it with the `x-resolver-secret` header.
 
+## Monitoring
+
+**Usage:** Vercel Web Analytics counts page views without cookies. The `<Analytics />` component is in `src/app/layout.tsx`. Turn it on once for the project, with `npx vercel project web-analytics enable pickify` or in the dashboard under Analytics, and the numbers show up there.
+
+**Error alerts** go to a Discord channel through a webhook:
+
+- **Server errors:** unexpected crashes in the API, Last.fm outages (not "song not found"), and the YouTube matcher failing.
+- **Page crashes in someone's browser:** the error page reports them to `POST /api/client-errors`, which is rate limited.
+
+Each problem is sent at most once per 10 minutes, after the response has gone out, so alerts never slow anyone down. They're off unless `DISCORD_ALERT_WEBHOOK_URL` is set, so set it in Production only:
+
+1. In Discord, open a channel's settings, then **Integrations**, **Webhooks**, **New Webhook**, and copy its URL.
+2. Run `npx vercel env add DISCORD_ALERT_WEBHOOK_URL production` and paste it, marked as sensitive. Or add it in the Vercel dashboard under Settings, Environment Variables, Production only.
+3. Redeploy production.
+
 ## Theme
 
 Dark "teal pulse" theme, defined in `src/app/globals.css`. Use the Tailwind classes it creates, such as `bg-surface`, `text-accent`, `text-text-secondary` and `border-border`, instead of hex values.

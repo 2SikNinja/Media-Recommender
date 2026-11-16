@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, readJsonBody, toErrorResponse } from "./apiErrors";
 import { createSessionSchema } from "./apiSchemas";
@@ -54,5 +54,36 @@ describe("rate limit responses", () => {
     expect(response.status).toBe(429);
     expect(response.headers.get("Retry-After")).toBe("12");
     expect(await response.json()).toEqual({ error: { code: "rateLimited", message: "Slow down." } });
+  });
+});
+
+describe("alerts from error responses", () => {
+  const fetchMock = vi.fn<typeof fetch>();
+
+  beforeEach(() => {
+    fetchMock.mockReset().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("DISCORD_ALERT_WEBHOOK_URL", "https://discord.test/api/webhooks/1/abc");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("alerts on unexpected errors", async () => {
+    toErrorResponse(new Error("database exploded"), "GET /api/alertTest");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).embeds[0].title).toBe("Unexpected server error");
+  });
+
+  it("alerts when Last.fm is down, but not when it just doesn't know a song", async () => {
+    toErrorResponse(new LastfmError("Track not found", 6, 200), "GET /api/alertTest2");
+    toErrorResponse(new ApiError("notFound", "No such playlist."), "GET /api/alertTest2");
+    expect(fetchMock).not.toHaveBeenCalled();
+    toErrorResponse(new LastfmError("Service Temporarily Unavailable", 16, 503), "GET /api/alertTest2");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   });
 });
