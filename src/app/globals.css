@@ -55,3 +55,51 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/*
+ * Volume slider: a tall, easy-to-grab hit area around a thin track, with the
+ * level filled in teal. --fill is set inline to the current percentage.
+ */
+@layer components {
+  .volume-slider {
+    appearance: none;
+    height: 24px;
+    background: transparent;
+    cursor: pointer;
+  }
+  .volume-slider::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 999px;
+    background: linear-gradient(to right, var(--colorAccent) var(--fill), var(--colorBorder) var(--fill));
+  }
+  .volume-slider::-moz-range-track {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--colorBorder);
+  }
+  .volume-slider::-moz-range-progress {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--colorAccent);
+  }
+  .volume-slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    margin-top: -5px;
+    border-radius: 999px;
+    background: var(--colorTextPrimary);
+    transition: transform 120ms ease;
+  }
+  .volume-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--colorTextPrimary);
+  }
+  .volume-slider:hover::-webkit-slider-thumb,
+  .volume-slider:focus-visible::-webkit-slider-thumb {
+    transform: scale(1.2);
+  }
+}

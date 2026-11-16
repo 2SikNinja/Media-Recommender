@@ -3,6 +3,10 @@
 import { ChevronDown, ExternalLink, LoaderCircle, Pause, Play, SkipBack, SkipForward, X } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { useVolume, type Volume } from "@/lib/volume";
+
+import { VolumeControl } from "./VolumeControl";
+
 /** The parts of YouTube's IFrame Player API that this player uses. */
 type YoutubePlayer = {
   loadPlaylist: (videoIds: string[], index?: number) => void;
@@ -11,6 +15,9 @@ type YoutubePlayer = {
   nextVideo: () => void;
   previousVideo: () => void;
   getPlaylistIndex: () => number;
+  setVolume: (volume: number) => void;
+  mute: () => void;
+  unMute: () => void;
   stopVideo: () => void;
   destroy: () => void;
 };
@@ -67,6 +74,14 @@ function loadYoutubeApi(): Promise<YoutubeNamespace> {
   return apiPromise;
 }
 
+/** Sets YouTube's player to the site-wide volume. YouTube takes 0 to 100 and a separate mute. */
+function applyVolume(player: YoutubePlayer | null, volume: Volume) {
+  if (!player) return;
+  player.setVolume(Math.round(volume.level * 100));
+  if (volume.muted) player.mute();
+  else player.unMute();
+}
+
 export type QueueItem = { position: number; videoId: string; title: string; artist: string };
 
 type PlayerStatus = "loading" | "playing" | "paused" | "ended";
@@ -103,6 +118,8 @@ export function PagePlayerProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<PlayerStatus>("loading");
   const [skippedPositions, setSkippedPositions] = useState<ReadonlySet<number>>(() => new Set());
   const playerRef = useRef<YoutubePlayer | null>(null);
+  const volume = useVolume();
+  const volumeRef = useRef<Volume>(volume);
   const videoElementRef = useRef<HTMLDivElement | null>(null);
   const queueRef = useRef<QueueItem[] | null>(null);
   // A queue asked for before the player was ready.
@@ -125,6 +142,7 @@ export function PagePlayerProvider({ children }: { children: ReactNode }) {
       playerVars: { playsinline: 1, rel: 0, modestbranding: 1, autoplay: 1 },
       events: {
         onReady: () => {
+          applyVolume(playerRef.current, volumeRef.current);
           const pending = pendingRef.current;
           pendingRef.current = null;
           if (pending) playerRef.current?.loadPlaylist(pending.videoIds, pending.startIndex);
@@ -193,6 +211,12 @@ export function PagePlayerProvider({ children }: { children: ReactNode }) {
     queueRef.current = null;
     setQueue(null);
   }, []);
+
+  // Follow the site-wide volume, from this player's slider or the header's.
+  useEffect(() => {
+    volumeRef.current = volume;
+    applyVolume(playerRef.current, volume);
+  }, [volume]);
 
   useEffect(() => () => playerRef.current?.destroy(), []);
 
@@ -282,6 +306,8 @@ export function PlayerDock({ openOnYoutubeUrl }: { openOnYoutubeUrl: string | nu
           <SkipForward size={18} fill="currentColor" aria-hidden="true" />
         </button>
       </div>
+      {/* Pickify's own volume, since YouTube's slider is hard to reach in a small player. */}
+      <VolumeControl variant="wide" className="-mt-1 pr-4 pb-1 pl-2 [@media(hover:none)]:hidden" />
       <div className="flex items-center justify-between gap-2 px-3 pb-3 text-xs">
         <span className="pl-1 text-text-secondary tabular-nums">
           {currentIndex + 1} of {queue.length}

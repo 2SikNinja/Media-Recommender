@@ -4,6 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { Analytics } from "@vercel/analytics/next";
 
+import { VolumeControl } from "@/components/VolumeControl";
+
 import "./globals.css";
 
 const geistSans = Geist({
@@ -34,11 +36,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${bricolage.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
-        <header className="mx-auto flex w-full max-w-5xl items-center px-5 py-5 sm:px-8">
+        <header className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-5 py-5 sm:px-8">
           <Link href="/" className="flex items-center gap-2.5 rounded-md text-text-primary">
             <Image src="/logo.svg" alt="" width={34} height={34} priority />
             <span className="font-display text-xl font-semibold tracking-tight">Pickify</span>
           </Link>
+          <VolumeControl />
         </header>
 
         <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-5 pb-16 sm:px-8">{children}</main>
