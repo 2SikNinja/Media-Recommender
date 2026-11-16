@@ -17,6 +17,7 @@ import { saveToHistory } from "@/lib/history";
 
 import { PreviewDisc } from "./PreviewDisc";
 import { PreviewPlayerProvider, usePreviewPlayer } from "./PreviewPlayer";
+import { ShareButton } from "./ShareButton";
 import { preloadAlbumArt } from "./RecordArt";
 
 type ExportMode = "inOrder" | "shuffled";
@@ -203,6 +204,7 @@ function PlaylistViewContent() {
           )}
           Shuffle play
         </button>
+        <ShareButton title={playlist.title} />
       </div>
 
       <div aria-live="polite">
