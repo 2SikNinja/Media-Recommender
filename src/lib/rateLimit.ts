@@ -28,6 +28,8 @@ export const rateLimits = {
    * 50 YouTube searches the first time, then cached for 30 days.
    */
   youtubeExport: { limit: 20, windowSeconds: 60 },
+  /** Crash reports from the browser, which only ever send one per crash. */
+  clientErrors: { limit: 5, windowSeconds: 60 },
   /** Covers and previews: a round shows 10 at once, and the CDN absorbs repeats. */
   media: { limit: 300, windowSeconds: 60 },
 } satisfies Record<string, Limit>;

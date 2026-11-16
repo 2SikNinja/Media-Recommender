@@ -1,3 +1,4 @@
+import { describeError, reportProblem } from "./alerts";
 import { ApiError } from "./apiErrors";
 import type { Db } from "./dbTypes";
 import { ResolverError, type Resolver } from "./resolverClient";
@@ -224,6 +225,12 @@ export async function exportPlaylistToYoutube(deps: ExportDeps, playlistId: stri
         if (!(error instanceof ResolverError)) throw error;
         // Keep going with whatever is cached. Only fail if there is nothing to play.
         console.error("[exportPlaylistToYoutube] resolver failed", error);
+        reportProblem({
+          key: `resolver:${error.message.slice(0, 120)}`,
+          title: "The YouTube matcher isn't working",
+          detail: describeError(error),
+          where: "POST /api/playlists/:playlistId/export/youtube",
+        });
         if (videoIdByKey.size === 0) {
           throw new ApiError("upstreamUnavailable", "We couldn't reach YouTube right now. Try again in a moment.");
         }

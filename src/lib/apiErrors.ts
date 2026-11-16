@@ -1,6 +1,7 @@
 import { unstable_rethrow } from "next/navigation";
 import { ZodError } from "zod";
 
+import { describeError, reportProblem } from "./alerts";
 import { DeezerError } from "./deezer";
 import { LastfmError } from "./lastfm";
 
@@ -62,6 +63,22 @@ export function toErrorResponse(error: unknown, context: string): Response {
   }
   if (error instanceof LastfmError) {
     console.error(`[${context}] Last.fm error`, { code: error.lastfmCode, status: error.httpStatus, message: error.message });
+    // Only outages: no response, server errors, rate limits, or Last.fm's own
+    // "service offline / temporarily unavailable / rate limit" codes. A song
+    // Last.fm doesn't know is the user's search, not a problem to alert on.
+    const isOutage =
+      error.httpStatus === null ||
+      error.httpStatus >= 500 ||
+      error.httpStatus === 429 ||
+      [8, 11, 16, 29].includes(error.lastfmCode ?? -1);
+    if (isOutage) {
+      reportProblem({
+        key: `lastfm:${error.httpStatus ?? "network"}:${error.lastfmCode ?? ""}`,
+        title: "Last.fm isn't responding",
+        detail: error.message,
+        where: context,
+      });
+    }
     return errorResponse("upstreamUnavailable", "The music service isn't responding right now. Try again in a moment.");
   }
   if (error instanceof DeezerError) {
@@ -69,6 +86,12 @@ export function toErrorResponse(error: unknown, context: string): Response {
     return errorResponse("upstreamUnavailable", "Covers and previews aren't available right now.");
   }
   console.error(`[${context}] unexpected error`, error);
+  reportProblem({
+    key: `unexpected:${context}:${error instanceof Error ? error.message.slice(0, 120) : String(error).slice(0, 120)}`,
+    title: "Unexpected server error",
+    detail: describeError(error),
+    where: context,
+  });
   return errorResponse("internalError", "Something went wrong on our end. Try again.");
 }
 

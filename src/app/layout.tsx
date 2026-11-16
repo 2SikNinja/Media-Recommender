@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Geist } from "next/font/google";
 import Image from "next/image";
 import Link from "next/link";
+import { Analytics } from "@vercel/analytics/next";
 
 import "./globals.css";
 
@@ -49,6 +50,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           </a>
           . Playback on YouTube.
         </footer>
+        {/* Page views for the Vercel dashboard. No cookies, and it does nothing until Web Analytics is turned on. */}
+        <Analytics />
       </body>
     </html>
   );
