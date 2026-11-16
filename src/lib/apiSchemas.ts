@@ -4,6 +4,11 @@ const trimmedName = z.string().trim().min(1, "can't be empty").max(200, "is too 
 
 export const idSchema = z.uuid("must be a valid ID");
 
+export const albumArtQuerySchema = z.object({
+  artist: trimmedName.refine((value) => /[\p{L}\p{N}]/u.test(value), "needs letters or numbers"),
+  title: trimmedName.refine((value) => /[\p{L}\p{N}]/u.test(value), "needs letters or numbers"),
+});
+
 export const searchQuerySchema = z.object({
   q: z.string().trim().min(1, "can't be empty").max(100, "is too long"),
 });
@@ -17,7 +22,10 @@ const roundNumberSchema = z.number().int().min(1).max(10);
 
 export const submitPickSchema = z.object({
   roundNumber: roundNumberSchema,
-  trackKey: z.string().min(3).max(500),
+  trackKeys: z
+    .array(z.string().min(3).max(500))
+    .min(1, "must include at least one song")
+    .max(10, "can include at most 10 songs"),
 });
 
 export const rerollSchema = z.object({

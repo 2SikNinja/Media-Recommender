@@ -1,6 +1,6 @@
 # Pickify
 
-Pick a song you like. Pickify shows you 10 similar songs, you choose your favorite, and it uses your picks to suggest the next 10. After a few rounds it builds a 50-song playlist you can open on YouTube Music, in order or shuffled.
+Pick a song you like. Pickify shows you 10 similar songs, you pick as many as you like, and it uses your picks to suggest the next 10. After a few rounds it builds a 50-song playlist you can open on YouTube Music, in order or shuffled.
 
 ## Tech stack
 
@@ -8,6 +8,7 @@ Pick a song you like. Pickify shows you 10 similar songs, you choose your favori
 | --- | --- |
 | Frontend and API | Next.js (App Router), TypeScript, Tailwind CSS |
 | Song similarity | Last.fm API (`track.getSimilar`) |
+| Album art | Deezer API (public, no key) |
 | YouTube matching | Python resolver using `ytmusicapi` (in `/resolver`) |
 | Database | Neon Postgres |
 | Hosting | Vercel (two projects: the app and the resolver) |
@@ -29,7 +30,7 @@ public/               Static assets
 1. Last.fm's `track.getSimilar` returns songs similar to the seed, each with a similarity score from 0 to 1.
 2. Those songs go into a **candidate pool**. When a song shows up as similar to more than one of your picks, its scores add up, so it rises to the top.
 3. Each round shows the 10 highest-scoring songs you haven't seen yet, with at most 2 per artist.
-4. Your pick's similar songs are merged into the pool. Later picks count a little more than earlier ones, and songs you skipped are scored lower.
+4. The similar songs for each song you picked are merged into the pool. Later picks count a little more than earlier ones, and songs you skipped are scored lower.
 5. The final playlist is the seed and your picks first, then the best songs left in the pool, up to 50 with at most 3 per artist.
 
 The logic lives in `src/lib/candidatePool.ts`.
@@ -43,8 +44,9 @@ All endpoints return JSON. Errors look like `{ "error": { "code": "conflict", "m
 | `GET` | `/api/tracks/search?q=believe` | | `{ tracks }`: up to 10 songs to pick a seed from |
 | `POST` | `/api/sessions` | `{ artist, title }` | Session state with round 1 (201) |
 | `GET` | `/api/sessions/:sessionId` | | Session state |
-| `POST` | `/api/sessions/:sessionId/picks` | `{ roundNumber, trackKey }` | Session state with the next round, or `status: "complete"` and a `playlistId` after the last round |
+| `POST` | `/api/sessions/:sessionId/picks` | `{ roundNumber, trackKeys }` (1 to 10 songs) | Session state with the next round, or `status: "complete"` and a `playlistId` after the last round |
 | `POST` | `/api/sessions/:sessionId/reroll` | `{ roundNumber }` | Session state with 10 new songs for the same round ("none of these") |
+| `GET` | `/api/art?artist=&title=` | | Redirects to the album cover (302), or 404 when there isn't one. Used directly as an image source |
 | `GET` | `/api/playlists/:playlistId` | | `{ playlistId, title, tracks }` with 50 songs in order |
 | `POST` | `/api/playlists/:playlistId/export/youtube` | `{ shuffle?: boolean }` | `{ youtubeUrl, youtubeMusicUrl, trackCount, unresolvedTracks }` |
 
@@ -52,9 +54,11 @@ All endpoints return JSON. Errors look like `{ "error": { "code": "conflict", "m
 
 Notes:
 
-- **Picks are safe to retry.** Sending the same pick again returns the current state, and a different pick for a round that's already done returns `409 conflict`.
+- **Picks are safe to retry.** Sending the same songs again, in any order, returns the current state. Different songs for a round that's already done return `409 conflict`.
+- **Every picked song counts.** Each one adds its similar songs to the pool, and all picks go at the front of the playlist, right after the seed, in the order they were shown.
 - **Rerolled songs never come back**, in later rounds or in the playlist.
 - **Sessions can end early.** If Last.fm runs out of new suggestions, the session finishes before round 5 instead of showing an empty round.
+- **Album covers are cached** in `track_cache`, including songs with no cover (retried after 30 days), and the CDN caches the redirects for 30 days.
 - **The export only sends songs to the resolver that aren't cached yet**, and it saves new matches for 30 days. `youtubeMusicUrl` is `null` when YouTube doesn't hand back a temporary playlist ID. In that case, use `youtubeUrl`.
 
 ## Database

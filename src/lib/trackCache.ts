@@ -5,7 +5,6 @@ import type { SimilarTrack, Track } from "./tracks";
 export const similarTracksMaxAgeDays = 30;
 
 export type MusicSource = {
-  getTrackInfo(artist: string, title: string): Promise<Track | null>;
   getSimilarTracks(artist: string, title: string, limit?: number): Promise<SimilarTrack[]>;
 };
 

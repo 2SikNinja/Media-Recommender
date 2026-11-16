@@ -59,13 +59,14 @@ export function addSimilarTracks(pool: CandidatePool, similarTracks: SimilarTrac
 export function penalizeSkipped(
   pool: CandidatePool,
   shownKeys: string[],
-  pickedKey: string,
+  pickedKeys: Iterable<string>,
   penalty = defaultSkippedPenalty,
 ): CandidatePool {
+  const picked = new Set(pickedKeys);
   const nextPool: CandidatePool = { ...pool };
   for (const shownKey of shownKeys) {
     const entry = nextPool[shownKey];
-    if (shownKey !== pickedKey && entry) {
+    if (!picked.has(shownKey) && entry) {
       nextPool[shownKey] = { ...entry, score: entry.score * penalty };
     }
   }

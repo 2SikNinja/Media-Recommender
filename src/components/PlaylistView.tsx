@@ -72,7 +72,7 @@ export function PlaylistView() {
   return (
     <section className="mx-auto w-full max-w-3xl pt-6 sm:pt-10">
       <div className="flex flex-col gap-6 sm:flex-row sm:items-end">
-        {seedTrack && <RecordArt artist={seedTrack.artist} imageUrl={null} size={128} />}
+        {seedTrack && <RecordArt artist={seedTrack.artist} title={seedTrack.title} size={128} />}
         <div className="min-w-0">
           <p className="text-text-secondary">Your playlist, {playlist.tracks.length} songs</p>
           <h1 className="mt-1 font-display text-4xl leading-tight font-semibold tracking-tight text-balance sm:text-5xl">
@@ -160,6 +160,7 @@ export function PlaylistView() {
         {playlist.tracks.map((track) => (
           <li key={track.position} className="flex items-center gap-4 border-b border-border/60 py-3 last:border-b-0">
             <span className="w-6 shrink-0 text-right text-sm text-text-secondary tabular-nums">{track.position}</span>
+            <RecordArt artist={track.artist} title={track.title} size={40} />
             <span className="min-w-0 flex-1">
               <span className="block truncate font-medium">{track.title}</span>
               <span className="block truncate text-sm text-text-secondary">{track.artist}</span>

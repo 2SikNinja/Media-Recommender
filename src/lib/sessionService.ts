@@ -48,8 +48,11 @@ type SessionRow = {
 type RoundRow = {
   round_number: number;
   candidates: Track[];
-  picked_track_key: string | null;
+  picked_track_keys: string[] | null;
 };
+
+/** Similar-track lookups for several picks run a few at a time to stay under Last.fm's rate limit. */
+const similarLookupConcurrency = 3;
 
 type LoadedSession = {
   session: SessionRow;
@@ -67,11 +70,18 @@ function seedFromRow(session: SessionRow): Track {
   };
 }
 
+/** Every picked song, round by round, in the order each round showed them. */
 function pickedTracks(rounds: RoundRow[]): Track[] {
-  return rounds
-    .filter((round) => round.picked_track_key !== null)
-    .map((round) => round.candidates.find((track) => track.trackKey === round.picked_track_key))
-    .filter((track): track is Track => track !== undefined);
+  return rounds.flatMap((round) => {
+    const pickedKeys = new Set(round.picked_track_keys ?? []);
+    return round.candidates.filter((track) => pickedKeys.has(track.trackKey));
+  });
+}
+
+function sameKeys(first: string[], second: string[]): boolean {
+  const firstSet = new Set(first);
+  const secondSet = new Set(second);
+  return firstSet.size === secondSet.size && [...firstSet].every((key) => secondSet.has(key));
 }
 
 function toState({ session, rounds, playlistId }: LoadedSession): SessionState {
@@ -102,7 +112,7 @@ async function loadSession(db: Db, sessionId: string): Promise<LoadedSession> {
 
   const [rounds, playlistRows] = await Promise.all([
     db.query<RoundRow>(
-      `select round_number, candidates, picked_track_key
+      `select round_number, candidates, picked_track_keys
          from session_rounds where session_id = $1 order by round_number`,
       [sessionId],
     ),
@@ -132,8 +142,9 @@ export async function createSession(deps: SessionDeps, input: CreateSessionInput
     throw new ApiError("invalidRequest", "Enter a song title and artist with letters or numbers in them.");
   }
 
-  // Prefer Last.fm's spelling of the song so cache keys stay consistent.
-  const seed = (await musicSource.getTrackInfo(input.artist, input.title)) ?? {
+  // Seeds come from Last.fm search results, so the names are already Last.fm's
+  // spelling. Skipping a separate track.getInfo call keeps "Start here" fast.
+  const seed: Track = {
     trackKey: makeTrackKey(input.artist, input.title),
     artist: input.artist,
     title: input.title,
@@ -164,13 +175,13 @@ export async function createSession(deps: SessionDeps, input: CreateSessionInput
   return getSessionState(db, sessionId);
 }
 
-export type SubmitPickInput = { roundNumber: number; trackKey: string };
+export type SubmitPickInput = { roundNumber: number; trackKeys: string[] };
 
 /**
- * Records the pick for a round, then either deals the next round or, after the
- * last round, builds the playlist.
+ * Records the picks for a round (one or more songs), then either deals the next
+ * round or, after the last round, builds the playlist.
  *
- * Safe to retry: sending the same pick again returns the current state, and
+ * Safe to retry: sending the same picks again returns the current state, and
  * every write is guarded so two requests racing on one session can't both
  * advance it.
  */
@@ -178,31 +189,40 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
   const { db, musicSource, createId = () => crypto.randomUUID() } = deps;
   const loaded = await loadSession(db, sessionId);
   const { session, rounds } = loaded;
+  const requestedKeys = [...new Set(input.trackKeys)];
 
   const round = rounds.find((candidateRound) => candidateRound.round_number === input.roundNumber);
   if (!round) {
     throw new ApiError("conflict", `Round ${input.roundNumber} hasn't started.`);
   }
-  if (round.picked_track_key !== null) {
-    if (round.picked_track_key === input.trackKey) return toState(loaded);
-    throw new ApiError("conflict", `You already picked a song for round ${input.roundNumber}.`);
+  if (round.picked_track_keys !== null) {
+    if (sameKeys(round.picked_track_keys, requestedKeys)) return toState(loaded);
+    throw new ApiError("conflict", `You already picked songs for round ${input.roundNumber}.`);
   }
   if (session.status !== "picking" || session.current_round !== input.roundNumber) {
     throw new ApiError("conflict", "That round is no longer active. Refresh to see where you are.");
   }
-
-  const pickedTrack = round.candidates.find((track) => track.trackKey === input.trackKey);
-  if (!pickedTrack) {
-    throw new ApiError("invalidRequest", "That song isn't one of this round's choices.");
+  if (requestedKeys.length === 0) {
+    throw new ApiError("invalidRequest", "Pick at least one song.");
   }
 
-  const similarTracks = await getSimilarTracksCached(db, musicSource, pickedTrack);
+  // Keep the round's order so picks read the same way they were shown.
+  const requestedKeySet = new Set(requestedKeys);
+  const pickedTracksThisRound = round.candidates.filter((track) => requestedKeySet.has(track.trackKey));
+  if (pickedTracksThisRound.length !== requestedKeys.length) {
+    throw new ApiError("invalidRequest", "One of those songs isn't one of this round's choices.");
+  }
+
+  let poolWithPicks = session.candidate_pool;
+  for (let start = 0; start < pickedTracksThisRound.length; start += similarLookupConcurrency) {
+    const batch = pickedTracksThisRound.slice(start, start + similarLookupConcurrency);
+    const similarLists = await Promise.all(batch.map((track) => getSimilarTracksCached(db, musicSource, track)));
+    for (const similarTracks of similarLists) {
+      poolWithPicks = addSimilarTracks(poolWithPicks, similarTracks, pickWeight(input.roundNumber));
+    }
+  }
   const shownKeys = round.candidates.map((track) => track.trackKey);
-  const nextPool = penalizeSkipped(
-    addSimilarTracks(session.candidate_pool, similarTracks, pickWeight(input.roundNumber)),
-    shownKeys,
-    pickedTrack.trackKey,
-  );
+  const nextPool = penalizeSkipped(poolWithPicks, shownKeys, requestedKeys);
 
   const nextRoundNumber = input.roundNumber + 1;
   const nextCandidates =
@@ -212,9 +232,9 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
 
   const statements: Statement[] = [
     {
-      text: `update session_rounds set picked_track_key = $3, picked_at = now()
-              where session_id = $1 and round_number = $2 and picked_track_key is null`,
-      params: [sessionId, input.roundNumber, pickedTrack.trackKey],
+      text: `update session_rounds set picked_track_keys = $3::text[], picked_at = now()
+              where session_id = $1 and round_number = $2 and picked_track_keys is null`,
+      params: [sessionId, input.roundNumber, pickedTracksThisRound.map((track) => track.trackKey)],
     },
     {
       text: `update sessions set candidate_pool = $3::jsonb, current_round = $4, status = $5
@@ -233,7 +253,7 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
     });
   } else {
     const seed = seedFromRow(session);
-    const playlistTracks = buildPlaylist({ seed, picks: [...pickedTracks(rounds), pickedTrack], pool: nextPool });
+    const playlistTracks = buildPlaylist({ seed, picks: [...pickedTracks(rounds), ...pickedTracksThisRound], pool: nextPool });
     const playlistId = createId();
     statements.push(
       {
@@ -275,7 +295,7 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
 export async function rerollRound(db: Db, sessionId: string, roundNumber: number): Promise<SessionState> {
   const { session, rounds } = await loadSession(db, sessionId);
   const round = rounds.find((candidateRound) => candidateRound.round_number === roundNumber);
-  if (session.status !== "picking" || session.current_round !== roundNumber || !round || round.picked_track_key) {
+  if (session.status !== "picking" || session.current_round !== roundNumber || !round || round.picked_track_keys) {
     throw new ApiError("conflict", "That round is no longer active. Refresh to see where you are.");
   }
 
@@ -289,7 +309,7 @@ export async function rerollRound(db: Db, sessionId: string, roundNumber: number
   await db.transaction([
     {
       text: `update session_rounds set candidates = $3::jsonb
-              where session_id = $1 and round_number = $2 and picked_track_key is null and candidates = $4::jsonb`,
+              where session_id = $1 and round_number = $2 and picked_track_keys is null and candidates = $4::jsonb`,
       params: [sessionId, roundNumber, JSON.stringify(nextCandidates), JSON.stringify(round.candidates)],
     },
     {

@@ -100,7 +100,7 @@ describe("penalizeSkipped", () => {
     const pickedKey = makeTrackKey("A", "Picked");
     const skippedKey = makeTrackKey("B", "Skipped");
 
-    const penalizedPool = penalizeSkipped(pool, [pickedKey, skippedKey, "missing::key"], pickedKey, 0.5);
+    const penalizedPool = penalizeSkipped(pool, [pickedKey, skippedKey, "missing::key"], [pickedKey], 0.5);
 
     expect(penalizedPool[pickedKey].score).toBe(1);
     expect(penalizedPool[skippedKey].score).toBe(0.5);
@@ -133,7 +133,7 @@ describe("buildPlaylist", () => {
   it("ranks songs the user skipped below songs they never saw", () => {
     const pool = addSimilarTracks({}, [makeSimilar("A", "Skipped", 1), makeSimilar("B", "Unseen", 0.8)]);
     const skippedKey = makeTrackKey("A", "Skipped");
-    const penalizedPool = penalizeSkipped(pool, [skippedKey], "other::key");
+    const penalizedPool = penalizeSkipped(pool, [skippedKey], ["other::key"]);
 
     const playlist = buildPlaylist({ seed: makeTrack("Seed", "Song"), picks: [], pool: penalizedPool, size: 2 });
 

@@ -32,12 +32,19 @@ describe("schema", () => {
     await expect(db.query(insertRound, [sessionId])).rejects.toThrow();
   });
 
-  it("requires a pick to have both a track and a time", async () => {
+  it("requires picks to have a time and between 1 and 10 songs", async () => {
     const sessionId = await createSession();
     await db.query("insert into session_rounds (session_id, round_number, candidates) values ($1, 1, '[]')", [sessionId]);
-    await expect(
-      db.query("update session_rounds set picked_track_key = 'x::y' where session_id = $1", [sessionId]),
-    ).rejects.toThrow();
+    const setPicks = (keys: string[], withTime: boolean) =>
+      db.query(
+        `update session_rounds set picked_track_keys = $2::text[], picked_at = ${withTime ? "now()" : "null"} where session_id = $1`,
+        [sessionId, keys],
+      );
+
+    await expect(setPicks(["x::y"], false)).rejects.toThrow();
+    await expect(setPicks([], true)).rejects.toThrow();
+    await expect(setPicks(Array.from({ length: 11 }, (_, index) => `a::${index}`), true)).rejects.toThrow();
+    await setPicks(["x::y", "x::z"], true);
   });
 
   it("rejects invalid or incomplete YouTube matches", async () => {

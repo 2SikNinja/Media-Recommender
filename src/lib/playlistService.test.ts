@@ -48,7 +48,7 @@ beforeEach(async () => {
   while (state.status === "picking") {
     state = await submitPick({ db, musicSource }, state.sessionId, {
       roundNumber: state.currentRound as number,
-      trackKey: state.candidates[0].trackKey,
+      trackKeys: [state.candidates[0].trackKey],
     });
   }
   playlistId = state.playlistId as string;

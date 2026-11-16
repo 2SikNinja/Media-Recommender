@@ -34,17 +34,17 @@ describe("apiClient", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("/api/tracks/search?q=AC%2FDC%20%26%20friends");
 
     stubFetch(Response.json({}));
-    await submitPick("a/b", 1, "x::y");
+    await submitPick("a/b", 1, ["x::y"]);
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/sessions/a%2Fb/picks");
   });
 
   it("turns API errors into ApiClientError with the server's message", async () => {
-    stubFetch(Response.json({ error: { code: "conflict", message: "You already picked a song for round 1." } }, { status: 409 }));
-    const error = await submitPick("s", 1, "x::y").catch((caught: unknown) => caught);
+    stubFetch(Response.json({ error: { code: "conflict", message: "You already picked songs for round 1." } }, { status: 409 }));
+    const error = await submitPick("s", 1, ["x::y"]).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(ApiClientError);
     expect(error).toMatchObject({ code: "conflict", status: 409 });
-    expect(errorMessage(error)).toBe("You already picked a song for round 1.");
+    expect(errorMessage(error)).toBe("You already picked songs for round 1.");
   });
 
   it("gives a clear message for network failures and non-JSON errors", async () => {
