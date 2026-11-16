@@ -61,7 +61,7 @@ describe("schema", () => {
     );
   });
 
-  it("caps playlists at 50 positions with no repeated songs", async () => {
+  it("caps playlists at 100 positions with no repeated songs", async () => {
     const sessionId = await createSession();
     const playlist = await db.query<{ id: string }>(
       "insert into playlists (session_id, title) values ($1, 'Test') returning id",
@@ -73,7 +73,16 @@ describe("schema", () => {
 
     await db.query(insertTrack, [playlistId, 1, "a::b"]);
     await expect(db.query(insertTrack, [playlistId, 2, "a::b"])).rejects.toThrow();
-    await expect(db.query(insertTrack, [playlistId, 51, "a::c"])).rejects.toThrow();
+    await db.query(insertTrack, [playlistId, 100, "a::c"]);
+    await expect(db.query(insertTrack, [playlistId, 101, "a::d"])).rejects.toThrow();
+  });
+
+  it("allows at most two extra seeds and a playlist of 10 to 100 songs", async () => {
+    const sessionId = await createSession();
+    const seed = '{"trackKey":"a::b","artist":"A","title":"B","durationSeconds":null,"imageUrl":null}';
+    await db.query(`update sessions set extra_seeds = '[${seed}, ${seed}]' where id = $1`, [sessionId]);
+    await expect(db.query(`update sessions set extra_seeds = '[${seed}, ${seed}, ${seed}]' where id = $1`, [sessionId])).rejects.toThrow();
+    await expect(db.query("update sessions set playlist_size = 101 where id = $1", [sessionId])).rejects.toThrow();
   });
 
   it("deletes rounds and playlists along with their session", async () => {

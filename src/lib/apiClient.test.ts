@@ -19,12 +19,13 @@ describe("apiClient", () => {
   it("sends JSON bodies and returns parsed responses", async () => {
     const fetchMock = stubFetch(Response.json({ sessionId: "abc" }, { status: 201 }));
 
-    await expect(createSession({ artist: "Cher", title: "Believe" })).resolves.toEqual({ sessionId: "abc" });
+    const options = { seeds: [{ artist: "Cher", title: "Believe" }], rounds: 5, playlistSize: 50 };
+    await expect(createSession(options)).resolves.toEqual({ sessionId: "abc" });
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/sessions");
     expect(init?.method).toBe("POST");
-    expect(JSON.parse(String(init?.body))).toEqual({ artist: "Cher", title: "Believe" });
+    expect(JSON.parse(String(init?.body))).toEqual(options);
     expect((init?.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
   });
 

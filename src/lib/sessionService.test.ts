@@ -5,7 +5,7 @@ import { createTestDb } from "@/test/pgliteDb";
 
 import { ApiError } from "./apiErrors";
 import type { Db } from "./dbTypes";
-import { createSession, getSessionState, rerollRound, submitPick, type SessionState } from "./sessionService";
+import { createSession, getSessionState, playlistTitle, rerollRound, submitPick, type SessionState } from "./sessionService";
 import type { MusicSource } from "./trackCache";
 import { makeTrackKey, type SimilarTrack } from "./tracks";
 
@@ -23,7 +23,7 @@ afterEach(async () => {
   await db.close();
 });
 
-const seedInput = { artist: "Seed Artist", title: "Seed Song" };
+const seedInput = { seeds: [{ artist: "Seed Artist", title: "Seed Song" }] };
 
 async function pickFirst(state: SessionState): Promise<SessionState> {
   return submitPick(deps, state.sessionId, {
@@ -59,7 +59,71 @@ describe("createSession", () => {
   });
 
   it("refuses names with no letters or numbers", async () => {
-    await expectApiError(createSession(deps, { artist: "!!!", title: "???" }), "invalidRequest");
+    await expectApiError(createSession(deps, { seeds: [{ artist: "!!!", title: "???" }] }), "invalidRequest");
+  });
+});
+
+describe("start options", () => {
+  const twoSeeds = {
+    seeds: [
+      { artist: "Seed Artist", title: "Seed Song" },
+      { artist: "Second Artist", title: "Second Song" },
+    ],
+  };
+
+  async function finish(state: SessionState): Promise<SessionState> {
+    let current = state;
+    while (current.status === "picking") current = await pickFirst(current);
+    return current;
+  }
+
+  async function playlistRows(playlistId: string | null) {
+    return db.query<{ position: number; track_key: string }>(
+      "select position, track_key from playlist_tracks where playlist_id = $1 order by position",
+      [playlistId],
+    );
+  }
+
+  it("blends several seeds: their suggestions are pooled and the playlist starts with all of them", async () => {
+    const state = await createSession(deps, twoSeeds);
+    expect(state.seeds.map((seed) => seed.title)).toEqual(["Seed Song", "Second Song"]);
+    expect(state.seed.title).toBe("Seed Song");
+    expect(state.candidates.map((track) => track.trackKey)).not.toContain("second artist::second song");
+    expect(fake.calls.getSimilarTracks).toBe(2);
+
+    const done = await finish(state);
+    const rows = await playlistRows(done.playlistId);
+    expect(rows.slice(0, 2).map((row) => row.track_key)).toEqual(["seed artist::seed song", "second artist::second song"]);
+    const [playlist] = await db.query<{ title: string }>("select title from playlists where id = $1", [done.playlistId]);
+    expect(playlist.title).toBe("Inspired by Seed Song and Second Song");
+  });
+
+  it("ignores the same seed chosen twice", async () => {
+    const state = await createSession(deps, { seeds: [twoSeeds.seeds[0], twoSeeds.seeds[0]] });
+    expect(state.seeds).toHaveLength(1);
+  });
+
+  it("plays the chosen number of rounds and builds a playlist of the chosen length", async () => {
+    const quick = await createSession(deps, { ...seedInput, rounds: 3, playlistSize: 25 });
+    expect(quick.totalRounds).toBe(3);
+    expect(quick.playlistSize).toBe(25);
+    const done = await finish(quick);
+    expect(done.picks).toHaveLength(3);
+    expect(await playlistRows(done.playlistId)).toHaveLength(25);
+  });
+
+  it("can build a 100-song playlist", async () => {
+    const deep = await createSession(deps, { ...seedInput, rounds: 8, playlistSize: 100 });
+    const done = await finish(deep);
+    const rows = await playlistRows(done.playlistId);
+    expect(rows).toHaveLength(100);
+    expect(rows.at(-1)?.position).toBe(100);
+  });
+
+  it("names playlists after every seed", () => {
+    const track = (title: string) => ({ trackKey: title, artist: "A", title, durationSeconds: null, imageUrl: null });
+    expect(playlistTitle([track("One")])).toBe("Inspired by One");
+    expect(playlistTitle([track("One"), track("Two"), track("Three")])).toBe("Inspired by One, Two and Three");
   });
 });
 

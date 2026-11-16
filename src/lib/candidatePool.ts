@@ -224,7 +224,8 @@ export function selectRound(
 }
 
 export type BuildPlaylistInput = {
-  seed: Track;
+  /** The seed songs, which start the playlist. */
+  seeds: Track[];
   picks: Track[];
   pool: CandidatePool;
   /** Songs to leave out even if the pool still ranks them, such as songs passed on in earlier rounds. */
@@ -235,13 +236,13 @@ export type BuildPlaylistInput = {
 };
 
 /**
- * The final playlist: the seed and every pick first, then the best-scoring songs
+ * The final playlist: the seeds and every pick first, then the best-scoring songs
  * from the pool that the user never passed on, ranked with the artist feedback. Uses the same artist limit and
  * fallback as selectRound. When the pool runs short, the playlist is shorter
  * rather than padded with songs the user didn't want.
  */
 export function buildPlaylist({
-  seed,
+  seeds,
   picks,
   pool,
   excludedKeys = [],
@@ -254,7 +255,7 @@ export function buildPlaylist({
   const artistCounts = new Map<string, number>();
   const leftOut = new Set(excludedKeys);
 
-  for (const track of [seed, ...picks]) {
+  for (const track of [...seeds, ...picks]) {
     if (playlist.length >= size || usedKeys.has(track.trackKey)) continue;
     playlist.push(track);
     usedKeys.add(track.trackKey);

@@ -29,7 +29,12 @@ export type SessionDeps = {
 export type SessionState = {
   sessionId: string;
   status: "picking" | "complete";
+  /** The first seed song. */
   seed: Track;
+  /** Every seed song, the first one included (one to three). */
+  seeds: Track[];
+  /** How many songs the finished playlist will have, at most. */
+  playlistSize: number;
   /** The round waiting for a pick, or null once the session is complete. */
   currentRound: number | null;
   totalRounds: number;
@@ -49,6 +54,8 @@ type SessionRow = {
   total_rounds: number;
   candidate_pool: CandidatePool;
   artist_feedback: ArtistFeedback;
+  extra_seeds: Track[];
+  playlist_size: number;
 };
 
 type RoundRow = {
@@ -83,6 +90,11 @@ type LoadedSession = {
   rounds: RoundRow[];
   playlistId: string | null;
 };
+
+/** The first seed, then any others, in the order they were chosen. */
+function seedsFromRow(session: SessionRow): Track[] {
+  return [seedFromRow(session), ...session.extra_seeds];
+}
 
 function seedFromRow(session: SessionRow): Track {
   return {
@@ -127,6 +139,8 @@ function toState({ session, rounds, playlistId }: LoadedSession): SessionState {
     sessionId: session.id,
     status: session.status,
     seed: seedFromRow(session),
+    seeds: seedsFromRow(session),
+    playlistSize: session.playlist_size,
     currentRound: isComplete ? null : session.current_round,
     totalRounds: session.total_rounds,
     candidates: isComplete ? [] : (currentRoundRow?.candidates ?? []),
@@ -137,7 +151,8 @@ function toState({ session, rounds, playlistId }: LoadedSession): SessionState {
 
 async function loadSession(db: Db, sessionId: string): Promise<LoadedSession> {
   const sessionRows = await db.query<SessionRow>(
-    `select id, seed_track_key, seed_artist, seed_title, status, current_round, total_rounds, candidate_pool, artist_feedback
+    `select id, seed_track_key, seed_artist, seed_title, status, current_round, total_rounds, candidate_pool, artist_feedback,
+            extra_seeds, playlist_size
        from sessions where id = $1`,
     [sessionId],
   );
@@ -159,7 +174,7 @@ async function loadSession(db: Db, sessionId: string): Promise<LoadedSession> {
 
 /** Every song shown so far plus the seed, so later rounds never repeat one. */
 function seenKeys(session: SessionRow, rounds: RoundRow[]): Set<string> {
-  const keys = new Set<string>([session.seed_track_key]);
+  const keys = new Set<string>(seedsFromRow(session).map((seed) => seed.trackKey));
   for (const round of rounds) {
     for (const track of round.candidates) keys.add(track.trackKey);
   }
@@ -170,37 +185,69 @@ export async function getSessionState(db: Db, sessionId: string): Promise<Sessio
   return toState(await loadSession(db, sessionId));
 }
 
-export type CreateSessionInput = { artist: string; title: string };
+export type CreateSessionInput = {
+  /** One to three songs to start from. */
+  seeds: Array<{ artist: string; title: string }>;
+  rounds?: number;
+  playlistSize?: number;
+};
+
+/** "Inspired by A", "Inspired by A and B" or "Inspired by A, B and C". */
+export function playlistTitle(seeds: Track[]): string {
+  const titles = seeds.map((seed) => seed.title);
+  const joined = titles.length <= 2 ? titles.join(" and ") : `${titles.slice(0, -1).join(", ")} and ${titles.at(-1)}`;
+  return `Inspired by ${joined}`.slice(0, 200);
+}
 
 export async function createSession(deps: SessionDeps, input: CreateSessionInput): Promise<SessionState> {
   const { db, musicSource, createId = () => crypto.randomUUID() } = deps;
-  if (!normalizeText(input.artist) || !normalizeText(input.title)) {
+  const { rounds = 5, playlistSize = 50 } = input;
+  if (input.seeds.length === 0 || input.seeds.some((seed) => !normalizeText(seed.artist) || !normalizeText(seed.title))) {
     throw new ApiError("invalidRequest", "Enter a song title and artist with letters or numbers in them.");
   }
 
   // Seeds come from Last.fm search results, so the names are already Last.fm's
   // spelling. Skipping a separate track.getInfo call keeps "Start here" fast.
-  const seed: Track = {
-    trackKey: makeTrackKey(input.artist, input.title),
-    artist: input.artist,
-    title: input.title,
-    durationSeconds: null,
-    imageUrl: null,
-  };
-
-  const similarTracks = await getSimilarTracksCached(db, musicSource, seed);
-  const pool = addSimilarTracks({}, similarTracks, pickWeight(0));
-  const candidates = selectRound(pool, [seed.trackKey]);
-  if (candidates.length < minimumFirstRoundSize) {
-    throw new ApiError("noSuggestions", "We couldn't find enough songs similar to that one. Try a different song.");
+  const seeds: Track[] = [];
+  for (const { artist, title } of input.seeds) {
+    const trackKey = makeTrackKey(artist, title);
+    if (seeds.some((seed) => seed.trackKey === trackKey)) continue;
+    seeds.push({ trackKey, artist, title, durationSeconds: null, imageUrl: null });
   }
 
+  // Each seed adds its similar songs, so songs close to all of them rise to the
+  // top and the rounds start as a blend.
+  let pool: CandidatePool = {};
+  for (const similarTracks of await lookupSimilar(db, musicSource, seeds)) {
+    pool = addSimilarTracks(pool, similarTracks, pickWeight(0));
+  }
+  const candidates = selectRound(pool, seeds.map((seed) => seed.trackKey));
+  if (candidates.length < minimumFirstRoundSize) {
+    throw new ApiError(
+      "noSuggestions",
+      seeds.length === 1
+        ? "We couldn't find enough songs similar to that one. Try a different song."
+        : "We couldn't find enough songs similar to those. Try different songs.",
+    );
+  }
+
+  const [firstSeed, ...extraSeeds] = seeds;
   const sessionId = createId();
   await db.transaction([
     {
-      text: `insert into sessions (id, seed_track_key, seed_artist, seed_title, candidate_pool)
-             values ($1, $2, $3, $4, $5::jsonb)`,
-      params: [sessionId, seed.trackKey, seed.artist, seed.title, JSON.stringify(pool)],
+      text: `insert into sessions
+               (id, seed_track_key, seed_artist, seed_title, candidate_pool, extra_seeds, total_rounds, playlist_size)
+             values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)`,
+      params: [
+        sessionId,
+        firstSeed.trackKey,
+        firstSeed.artist,
+        firstSeed.title,
+        JSON.stringify(pool),
+        JSON.stringify(extraSeeds),
+        rounds,
+        playlistSize,
+      ],
     },
     {
       text: "insert into session_rounds (session_id, round_number, candidates) values ($1, 1, $2::jsonb)",
@@ -323,9 +370,10 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
       params: [sessionId, nextRoundNumber, JSON.stringify(nextCandidates)],
     });
   } else {
-    const seed = seedFromRow(session);
+    const seeds = seedsFromRow(session);
     const playlistTracks = buildPlaylist({
-      seed,
+      seeds,
+      size: session.playlist_size,
       picks: [...pickedTracks(rounds), ...pickedTracksThisRound],
       pool: nextPool,
       // Also covers sessions started before skipped songs were marked in the pool.
@@ -339,7 +387,7 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
                select $1, $2, $3
                 where exists (select 1 from sessions where id = $2 and status = 'complete')
                on conflict (session_id) do nothing`,
-        params: [playlistId, sessionId, `Inspired by ${seed.title}`.slice(0, 200)],
+        params: [playlistId, sessionId, playlistTitle(seeds)],
       },
       {
         text: `insert into playlist_tracks (playlist_id, position, track_key, artist, title)

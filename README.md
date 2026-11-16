@@ -8,6 +8,7 @@ Pick a song you like. Pickify shows you 10 similar songs, you pick as many as yo
 
 ## Features
 
+- **Blend up to three songs** to start from, and choose how long it takes (3, 5 or 8 rounds) and how long the playlist is (25, 50 or 100 songs).
 - **Pick as many as you like.** Every picked song pulls in its own similar songs, and songs that keep coming up rise to the top.
 - **Hear before you pick.** Tap any record for a 30-second preview.
 - **Skips teach it too.** Songs you pass on push similar songs down, and a thumbs-down ("Not for me") pushes them down hard.
@@ -87,7 +88,7 @@ docs/screenshots/     Images for this README
 
 ## How recommendations work
 
-1. Last.fm's `track.getSimilar` returns songs similar to the seed, each with a similarity score from 0 to 1.
+1. Last.fm's `track.getSimilar` returns songs similar to each seed, each with a similarity score from 0 to 1. With several seeds, songs similar to more than one of them start ahead, so the rounds begin as a blend.
 2. Those songs go into a **candidate pool**. When a song shows up as similar to more than one of your picks, its scores add up, so it rises to the top.
 3. Each round shows the 10 highest-scoring songs you haven't seen yet, with at most 2 per artist.
 4. After each round:
@@ -96,7 +97,7 @@ docs/screenshots/     Images for this README
    - **"Not for me"** takes score away from its similar songs as strongly as a pick adds it.
    - **Artists** you skip are ranked lower (×0.75 per skip, ×0.56 for "Not for me", never below ×0.25). Picking one of their songs later cancels that.
    - Skipped and "Not for me" songs are out for good, like "None of these". Songs whose score drops to zero or below stop being suggested.
-5. The final playlist is the seed and your picks first, then the best songs left in the pool that you never passed on, up to 50 with at most 3 per artist. If the pool runs short, the playlist is shorter rather than padded with songs you skipped.
+5. The final playlist is the seeds and your picks first, then the best songs left in the pool that you never passed on, up to the length you chose (25, 50 or 100) with at most 3 per artist. If the pool runs short, the playlist is shorter rather than padded with songs you skipped.
 
 The logic lives in `src/lib/candidatePool.ts`.
 
@@ -107,7 +108,7 @@ All endpoints return JSON. Errors look like `{ "error": { "code": "conflict", "m
 | Method | Path | Body | Returns |
 | --- | --- | --- | --- |
 | `GET` | `/api/tracks/search?q=believe` | | `{ tracks }`: up to 10 songs to pick a seed from |
-| `POST` | `/api/sessions` | `{ artist, title }` | Session state with round 1 (201) |
+| `POST` | `/api/sessions` | `{ seeds: [{ artist, title }], rounds?, playlistSize? }` (1 to 3 seeds; rounds 3, 5 or 8, default 5; playlistSize 25, 50 or 100, default 50). The older `{ artist, title }` body still works | Session state with round 1 (201) |
 | `GET` | `/api/sessions/:sessionId` | | Session state |
 | `POST` | `/api/sessions/:sessionId/picks` | `{ roundNumber, trackKeys, dislikedKeys? }` (1 to 10 picks, plus songs marked "Not for me") | Session state with the next round, or `status: "complete"` and a `playlistId` after the last round |
 | `POST` | `/api/sessions/:sessionId/reroll` | `{ roundNumber, dislikedKeys? }` | Session state with 10 new songs for the same round ("none of these") |
@@ -117,7 +118,7 @@ All endpoints return JSON. Errors look like `{ "error": { "code": "conflict", "m
 | `PATCH` | `/api/playlists/:playlistId/tracks/:position` | `{ removed: boolean }` | The updated playlist. Takes a song out, or puts it back in its place |
 | `POST` | `/api/playlists/:playlistId/export/youtube` | | `{ queue, inOrder, shuffled, trackCount, unresolvedTracks }`. `queue` lists `{ position, videoId }` in playlist order for the on-page player; `inOrder` and `shuffled` are each `{ youtubeUrl, youtubeMusicUrl }`. The playlist page calls this as soon as it opens, so Play and Shuffle play are ready before anyone taps |
 
-**Session state** has the shape `{ sessionId, status, seed, currentRound, totalRounds, candidates, picks, playlistId }`. `candidates` holds the songs for the current round, and each song is `{ trackKey, artist, title, durationSeconds, imageUrl }`.
+**Session state** has the shape `{ sessionId, status, seed, seeds, playlistSize, currentRound, totalRounds, candidates, picks, playlistId }`. `candidates` holds the songs for the current round, and each song is `{ trackKey, artist, title, durationSeconds, imageUrl }`.
 
 Notes:
 

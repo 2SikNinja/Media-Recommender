@@ -183,9 +183,7 @@ function RoundPickerContent() {
         {pickCount > 0 ? (
           <>Chosen with the {pickCount === 1 ? "song" : `${pickCount} songs`} you&rsquo;ve picked so far in mind.</>
         ) : (
-          <>
-            Songs like <span className="text-text-primary">{session.seed.title}</span> by {session.seed.artist}.
-          </>
+          <SongsLike seeds={session.seeds ?? [session.seed]} />
         )}{" "}
         Pick as many as you like, and thumbs-down any you really don&rsquo;t want.
       </p>
@@ -257,5 +255,28 @@ export function RoundSkeleton() {
         ))}
       </div>
     </section>
+  );
+}
+
+/** "Songs like X by Y." for one seed, "Songs like X, Y and Z." for a blend. */
+function SongsLike({ seeds }: { seeds: SessionState["seeds"] }) {
+  if (seeds.length === 1) {
+    return (
+      <>
+        Songs like <span className="text-text-primary">{seeds[0].title}</span> by {seeds[0].artist}.
+      </>
+    );
+  }
+  return (
+    <>
+      Songs like{" "}
+      {seeds.map((seed, index) => (
+        <span key={seed.trackKey}>
+          <span className="text-text-primary">{seed.title}</span>
+          {index < seeds.length - 2 ? ", " : index === seeds.length - 2 ? " and " : ""}
+        </span>
+      ))}
+      .
+    </>
   );
 }

@@ -50,8 +50,14 @@ export function searchTracks(query: string, signal?: AbortSignal): Promise<{ tra
   return request(`/api/tracks/search?q=${encodeURIComponent(query)}`, { signal });
 }
 
-export function createSession(seed: { artist: string; title: string }): Promise<SessionState> {
-  return request("/api/sessions", { method: "POST", body: JSON.stringify(seed) });
+export type StartOptions = {
+  seeds: Array<{ artist: string; title: string }>;
+  rounds: number;
+  playlistSize: number;
+};
+
+export function createSession(options: StartOptions): Promise<SessionState> {
+  return request("/api/sessions", { method: "POST", body: JSON.stringify(options) });
 }
 
 export function getSession(sessionId: string): Promise<SessionState> {
