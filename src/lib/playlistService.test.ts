@@ -44,7 +44,7 @@ function fakeYoutubeFetch(listId: string | null) {
 beforeEach(async () => {
   db = await createTestDb();
   const musicSource = createFakeMusicSource().musicSource;
-  let state = await createSession({ db, musicSource }, { artist: "Seed Artist", title: "Seed Song" });
+  let state = await createSession({ db, musicSource }, { seeds: [{ artist: "Seed Artist", title: "Seed Song" }] });
   while (state.status === "picking") {
     state = await submitPick({ db, musicSource }, state.sessionId, {
       roundNumber: state.currentRound as number,

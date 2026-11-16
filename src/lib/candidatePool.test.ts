@@ -116,7 +116,7 @@ describe("rejectSkipped", () => {
     let pool = rejectSkipped(addSimilarTracks({}, [makeSimilar("B", "Skipped", 1)]), [skipped], []);
     pool = addSimilarTracks(pool, [makeSimilar("B", "Skipped", 1), makeSimilar("C", "Unseen", 0.1)], 2);
 
-    const playlist = buildPlaylist({ seed: makeTrack("Seed", "Song"), picks: [], pool });
+    const playlist = buildPlaylist({ seeds: [makeTrack("Seed", "Song")], picks: [], pool });
     expect(playlist.map((track) => track.title)).toEqual(["Song", "Unseen"]);
   });
 });
@@ -185,7 +185,7 @@ describe("artist feedback", () => {
     const pool = addSimilarTracks({}, [makeSimilar("Passed On", "Song", 1), makeSimilar("Fresh", "Song", 0.8)]);
     const feedback = updateArtistFeedback({}, { skipped: [makeTrack("Passed On", "Other")] });
     expect(selectRound(pool, [], { artistFeedback: feedback }).map((track) => track.artist)).toEqual(["Fresh", "Passed On"]);
-    expect(buildPlaylist({ seed: makeTrack("Seed", "Song"), picks: [], pool, artistFeedback: feedback })[1].artist).toBe("Fresh");
+    expect(buildPlaylist({ seeds: [makeTrack("Seed", "Song")], picks: [], pool, artistFeedback: feedback })[1].artist).toBe("Fresh");
   });
 });
 
@@ -194,7 +194,7 @@ describe("buildPlaylist", () => {
     const seed = makeTrack("Seed Artist", "Seed Song");
     const picks = [makeTrack("Artist 1", "Song 1"), makeTrack("Pick Artist", "Pick Song")];
 
-    const playlist = buildPlaylist({ seed, picks, pool: makePool(100, 40) });
+    const playlist = buildPlaylist({ seeds: [seed], picks, pool: makePool(100, 40) });
 
     expect(playlist).toHaveLength(50);
     expect(playlist.slice(0, 3).map((track) => track.title)).toEqual(["Seed Song", "Song 1", "Pick Song"]);
@@ -202,19 +202,19 @@ describe("buildPlaylist", () => {
   });
 
   it("allows at most three songs per artist when the pool is big enough", () => {
-    const playlist = buildPlaylist({ seed: makeTrack("Seed", "Song"), picks: [], pool: makePool(200, 30) });
+    const playlist = buildPlaylist({ seeds: [makeTrack("Seed", "Song")], picks: [], pool: makePool(200, 30) });
     for (const count of countByArtist(playlist).values()) expect(count).toBeLessThanOrEqual(3);
   });
 
   it("returns what it can when the pool is small", () => {
-    const playlist = buildPlaylist({ seed: makeTrack("Seed", "Song"), picks: [], pool: makePool(10, 2) });
+    const playlist = buildPlaylist({ seeds: [makeTrack("Seed", "Song")], picks: [], pool: makePool(10, 2) });
     expect(playlist).toHaveLength(11);
   });
 
   it("leaves out excluded songs, even when the pool still ranks them", () => {
     const pool = addSimilarTracks({}, [makeSimilar("A", "Skipped earlier", 1), makeSimilar("B", "Unseen", 0.2)]);
     const playlist = buildPlaylist({
-      seed: makeTrack("Seed", "Song"),
+      seeds: [makeTrack("Seed", "Song")],
       picks: [],
       pool,
       excludedKeys: [makeTrackKey("A", "Skipped earlier")],
@@ -225,7 +225,7 @@ describe("buildPlaylist", () => {
   it("is shorter rather than padded when only excluded songs are left", () => {
     const pool = makePool(30, 30);
     const excludedKeys = Object.keys(pool).slice(0, 25);
-    expect(buildPlaylist({ seed: makeTrack("Seed", "Song"), picks: [], pool, excludedKeys })).toHaveLength(6);
+    expect(buildPlaylist({ seeds: [makeTrack("Seed", "Song")], picks: [], pool, excludedKeys })).toHaveLength(6);
   });
 });
 
@@ -237,7 +237,7 @@ describe("rejectTracks", () => {
 
     expect(selectRound(resuggestedPool, []).map((track) => track.title)).toEqual(["Kept"]);
     expect(
-      buildPlaylist({ seed: makeTrack("Seed", "Song"), picks: [], pool: resuggestedPool }).map((track) => track.title),
+      buildPlaylist({ seeds: [makeTrack("Seed", "Song")], picks: [], pool: resuggestedPool }).map((track) => track.title),
     ).toEqual(["Song", "Kept"]);
   });
 
