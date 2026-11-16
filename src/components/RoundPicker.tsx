@@ -11,6 +11,7 @@ import { saveToHistory } from "@/lib/history";
 import { PreviewPlayerProvider, usePreviewPlayer } from "./PreviewPlayer";
 import { preloadAlbumArt } from "./RecordArt";
 import { RoundProgress } from "./RoundProgress";
+import { RoundShortcuts } from "./RoundShortcuts";
 import { TrackCard } from "./TrackCard";
 
 type Selection = { trackKeys: string[]; dislikedKeys: string[] };
@@ -40,7 +41,7 @@ function RoundPickerContent() {
   const [isNavigating, startNavigation] = useTransition();
   const pending: PendingAction = pendingRequest ?? (isNavigating ? "pick" : null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const { stop: stopPreview } = usePreviewPlayer();
+  const { stop: stopPreview, toggle: togglePreview } = usePreviewPlayer();
 
   useEffect(() => {
     let isCurrent = true;
@@ -201,6 +202,14 @@ function RoundPickerContent() {
           />
         ))}
       </div>
+
+      <RoundShortcuts
+        candidates={session.candidates}
+        disabled={pending !== null}
+        onPick={(track) => toggle(track.trackKey)}
+        onPreview={togglePreview}
+        onNextRound={confirmPicks}
+      />
 
       <div className="sticky bottom-0 -mx-5 mt-6 border-t border-border bg-background/95 px-5 py-4 backdrop-blur sm:mx-0 sm:rounded-b-xl sm:px-0">
         {actionError && (
