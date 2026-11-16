@@ -13,6 +13,9 @@ import { preloadAlbumArt } from "./RecordArt";
 import { RoundProgress } from "./RoundProgress";
 import { TrackCard } from "./TrackCard";
 
+type Selection = { trackKeys: string[]; dislikedKeys: string[] };
+const emptySelection: Selection = { trackKeys: [], dislikedKeys: [] };
+
 type PendingAction = "pick" | "reroll" | null;
 
 export function RoundPicker() {
@@ -28,7 +31,9 @@ function RoundPickerContent() {
   const router = useRouter();
   const [session, setSession] = useState<SessionState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [selection, setSelection] = useState<{ round: number; trackKeys: string[] } | null>(null);
+  // Picks and "Not for me" marks for the songs on screen. Cleared whenever a new
+  // set of songs arrives, including "None of these", which keeps the round number.
+  const [selection, setSelection] = useState<Selection>(emptySelection);
   const [pendingRequest, setPendingRequest] = useState<PendingAction>(null);
   // Moving to the playlist runs in a transition, so the busy state ends when the
   // playlist shows instead of coming back stuck if you press Back.
@@ -90,7 +95,7 @@ function RoundPickerContent() {
   }
 
   const roundNumber = session.currentRound;
-  const selectedKeys = selection?.round === roundNumber ? selection.trackKeys : [];
+  const { trackKeys: selectedKeys, dislikedKeys } = selection;
   const isLastRound = roundNumber >= session.totalRounds;
   const pickCount = session.picks.length;
 
@@ -106,6 +111,7 @@ function RoundPickerContent() {
     // The current round stays up, busy, until the next round's covers are ready.
     await preloadAlbumArt(next.candidates);
     setSession(next);
+    setSelection(emptySelection);
     setPendingRequest(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -128,11 +134,23 @@ function RoundPickerContent() {
 
   function toggle(trackKey: string) {
     setActionError(null);
+    // Picking a song marked "Not for me" takes the mark off.
     setSelection({
-      round: roundNumber,
       trackKeys: selectedKeys.includes(trackKey)
         ? selectedKeys.filter((key) => key !== trackKey)
         : [...selectedKeys, trackKey],
+      dislikedKeys: dislikedKeys.filter((key) => key !== trackKey),
+    });
+  }
+
+  function toggleDislike(trackKey: string) {
+    setActionError(null);
+    // Marking a picked song "Not for me" unpicks it.
+    setSelection({
+      trackKeys: selectedKeys.filter((key) => key !== trackKey),
+      dislikedKeys: dislikedKeys.includes(trackKey)
+        ? dislikedKeys.filter((key) => key !== trackKey)
+        : [...dislikedKeys, trackKey],
     });
   }
 
@@ -141,7 +159,7 @@ function RoundPickerContent() {
       setActionError("Pick at least one song.");
       return;
     }
-    void runAction("pick", () => submitPick(sessionId, roundNumber, selectedKeys));
+    void runAction("pick", () => submitPick(sessionId, roundNumber, selectedKeys, dislikedKeys));
   }
 
   return (
@@ -169,7 +187,7 @@ function RoundPickerContent() {
             Songs like <span className="text-text-primary">{session.seed.title}</span> by {session.seed.artist}.
           </>
         )}{" "}
-        Pick as many as you like.
+        Pick as many as you like, and thumbs-down any you really don&rsquo;t want.
       </p>
 
       <div role="group" aria-labelledby="round-heading" className="mt-8 grid gap-2 sm:grid-cols-2">
@@ -178,7 +196,9 @@ function RoundPickerContent() {
             key={track.trackKey}
             track={track}
             selected={selectedKeys.includes(track.trackKey)}
+            disliked={dislikedKeys.includes(track.trackKey)}
             onToggle={() => toggle(track.trackKey)}
+            onToggleDislike={() => toggleDislike(track.trackKey)}
             disabled={pending !== null}
           />
         ))}
@@ -193,7 +213,7 @@ function RoundPickerContent() {
         <div className="flex items-center justify-between gap-3">
           <button
             type="button"
-            onClick={() => void runAction("reroll", () => rerollRound(sessionId, roundNumber))}
+            onClick={() => void runAction("reroll", () => rerollRound(sessionId, roundNumber, dislikedKeys))}
             disabled={pending !== null}
             className="inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-2.5 text-text-secondary hover:bg-surface hover:text-text-primary disabled:opacity-50 sm:px-4"
           >

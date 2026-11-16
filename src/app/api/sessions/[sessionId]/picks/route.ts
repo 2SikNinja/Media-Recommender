@@ -6,7 +6,7 @@ import { enforceRateLimit } from "@/lib/rateLimit";
 import { submitPick } from "@/lib/sessionService";
 
 /**
- * POST /api/sessions/:sessionId/picks { roundNumber, trackKeys }
+ * POST /api/sessions/:sessionId/picks { roundNumber, trackKeys, dislikedKeys? }
  * Returns the next round, or the playlist ID after the last round. Safe to retry.
  */
 export async function POST(request: Request, context: RouteContext<"/api/sessions/[sessionId]/picks">) {

@@ -58,17 +58,22 @@ export function getSession(sessionId: string): Promise<SessionState> {
   return request(`/api/sessions/${encodeURIComponent(sessionId)}`);
 }
 
-export function submitPick(sessionId: string, roundNumber: number, trackKeys: string[]): Promise<SessionState> {
+export function submitPick(
+  sessionId: string,
+  roundNumber: number,
+  trackKeys: string[],
+  dislikedKeys: string[] = [],
+): Promise<SessionState> {
   return request(`/api/sessions/${encodeURIComponent(sessionId)}/picks`, {
     method: "POST",
-    body: JSON.stringify({ roundNumber, trackKeys }),
+    body: JSON.stringify({ roundNumber, trackKeys, dislikedKeys }),
   });
 }
 
-export function rerollRound(sessionId: string, roundNumber: number): Promise<SessionState> {
+export function rerollRound(sessionId: string, roundNumber: number, dislikedKeys: string[] = []): Promise<SessionState> {
   return request(`/api/sessions/${encodeURIComponent(sessionId)}/reroll`, {
     method: "POST",
-    body: JSON.stringify({ roundNumber }),
+    body: JSON.stringify({ roundNumber, dislikedKeys }),
   });
 }
 

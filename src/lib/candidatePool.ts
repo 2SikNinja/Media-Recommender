@@ -14,17 +14,39 @@ export type PoolEntry = {
   score: number;
   /** How many seed or picked songs listed this one as similar. */
   hits: number;
-  /** Set when the user rerolled past this song. It stays out of rounds and the playlist for good. */
+  /**
+   * Set when the user passed on this song: it was shown in a round and not
+   * picked, or swapped out with "none of these". It stays out of later rounds
+   * and the playlist for good.
+   */
   rejected?: boolean;
 };
 
 export type CandidatePool = Record<string, PoolEntry>;
 
+/**
+ * What the user has shown about each artist, keyed by artist key: picks count
+ * for (+1), skips against (-1) and "Not for me" strongly against (-2).
+ */
+export type ArtistFeedback = Record<string, number>;
+
 export const defaultRoundSize = 10;
 export const defaultPlaylistSize = 50;
 const defaultRoundArtistLimit = 2;
 const defaultPlaylistArtistLimit = 3;
-const defaultSkippedPenalty = 0.6;
+
+/**
+ * How strongly skipped songs push their similar songs down. All of a round's
+ * skips together weigh this fraction of the round's picks, so skipping 8 songs
+ * can't outweigh picking 2: a skip only says "less than the ones I picked".
+ */
+export const skipStrength = 0.5;
+/** "Not for me" pushes similar songs down as strongly as a pick pushes them up. */
+export const dislikeStrength = 1;
+
+/** Each step below zero in artist feedback scales the artist's songs by this much, down to the floor. */
+const artistPenaltyStep = 0.75;
+const artistPenaltyFloor = 0.25;
 
 /** Later picks reflect the user's taste better than the seed, so they count a bit more. */
 export function pickWeight(roundNumber: number): number {
@@ -53,24 +75,68 @@ export function addSimilarTracks(pool: CandidatePool, similarTracks: SimilarTrac
 }
 
 /**
- * Lowers the score of songs that were shown in a round but not picked. They are
- * already excluded from later rounds, so this only matters for the final playlist.
+ * The opposite of addSimilarTracks: lowers the songs similar to one the user
+ * passed on. Songs not in the pool yet are added with a negative score, so a
+ * later pick has to outweigh it before they can show up. Doesn't count as a hit.
  */
-export function penalizeSkipped(
-  pool: CandidatePool,
-  shownKeys: string[],
-  pickedKeys: Iterable<string>,
-  penalty = defaultSkippedPenalty,
-): CandidatePool {
-  const picked = new Set(pickedKeys);
+export function subtractSimilarTracks(pool: CandidatePool, similarTracks: SimilarTrack[], weight: number): CandidatePool {
   const nextPool: CandidatePool = { ...pool };
-  for (const shownKey of shownKeys) {
-    const entry = nextPool[shownKey];
-    if (!picked.has(shownKey) && entry) {
-      nextPool[shownKey] = { ...entry, score: entry.score * penalty };
-    }
+  for (const similarTrack of similarTracks) {
+    const { match, ...track } = similarTrack;
+    const existingEntry = nextPool[track.trackKey];
+    nextPool[track.trackKey] = existingEntry
+      ? { ...existingEntry, score: existingEntry.score - match * weight }
+      : { track, score: -match * weight, hits: 0 };
   }
   return nextPool;
+}
+
+/** The weight for each skipped song in a round, so the round's skips add up to skipStrength of its picks. */
+export function skipWeight(roundNumber: number, pickCount: number, skipCount: number): number {
+  if (pickCount === 0 || skipCount === 0) return 0;
+  return skipStrength * pickWeight(roundNumber) * Math.min(1, pickCount / skipCount);
+}
+
+/** The weight for each song marked "Not for me". */
+export function dislikeWeight(roundNumber: number): number {
+  return dislikeStrength * pickWeight(roundNumber);
+}
+
+/**
+ * Updates the artist feedback after a round. Skips and dislikes are counted
+ * first, then picks, so picking an artist's song cancels earlier skips of them.
+ */
+export function updateArtistFeedback(
+  feedback: ArtistFeedback,
+  { picked = [], skipped = [], disliked = [] }: { picked?: Track[]; skipped?: Track[]; disliked?: Track[] },
+): ArtistFeedback {
+  const next: ArtistFeedback = { ...feedback };
+  const change = (track: Track, amount: number) => {
+    const artistKey = makeArtistKey(track.artist);
+    next[artistKey] = (next[artistKey] ?? 0) + amount;
+  };
+  for (const track of skipped) change(track, -1);
+  for (const track of disliked) change(track, -2);
+  for (const track of picked) {
+    const artistKey = makeArtistKey(track.artist);
+    next[artistKey] = Math.max(next[artistKey] ?? 0, 0) + 1;
+  }
+  return next;
+}
+
+/** How much an artist's songs are scaled by: 1 unless the user has passed on them more than picked them. */
+export function artistMultiplier(feedback: ArtistFeedback, artist: string): number {
+  const net = feedback[makeArtistKey(artist)] ?? 0;
+  return net >= 0 ? 1 : Math.max(artistPenaltyFloor, artistPenaltyStep ** -net);
+}
+
+/**
+ * Marks the songs shown in a round but not picked as rejected, so they stay
+ * out of the playlist. Passing on a song is a clear "not this one".
+ */
+export function rejectSkipped(pool: CandidatePool, shownTracks: Track[], pickedKeys: Iterable<string>): CandidatePool {
+  const picked = new Set(pickedKeys);
+  return rejectTracks(pool, shownTracks.filter((track) => !picked.has(track.trackKey)));
 }
 
 /**
@@ -88,13 +154,22 @@ export function rejectTracks(pool: CandidatePool, tracks: Track[]): CandidatePoo
   return nextPool;
 }
 
-function rankEntries(pool: CandidatePool): PoolEntry[] {
-  return Object.values(pool).filter((entry) => !entry.rejected).sort(
-    (first, second) =>
-      second.score - first.score ||
-      second.hits - first.hits ||
-      first.track.trackKey.localeCompare(second.track.trackKey),
-  );
+/**
+ * Songs that can still be suggested, best first. Leaves out rejected songs and
+ * songs whose score skips have pushed to zero or below, and scales each score
+ * by the artist feedback.
+ */
+function rankEntries(pool: CandidatePool, artistFeedback: ArtistFeedback = {}): PoolEntry[] {
+  return Object.values(pool)
+    .filter((entry) => !entry.rejected && entry.score > 0)
+    .map((entry) => ({ entry, rank: entry.score * artistMultiplier(artistFeedback, entry.track.artist) }))
+    .sort(
+      (first, second) =>
+        second.rank - first.rank ||
+        second.entry.hits - first.entry.hits ||
+        first.entry.track.trackKey.localeCompare(second.entry.track.trackKey),
+    )
+    .map(({ entry }) => entry);
 }
 
 function takeWithArtistLimit(
@@ -124,6 +199,7 @@ function takeWithArtistLimit(
 export type SelectRoundOptions = {
   roundSize?: number;
   maxPerArtist?: number;
+  artistFeedback?: ArtistFeedback;
 };
 
 /**
@@ -134,9 +210,9 @@ export type SelectRoundOptions = {
 export function selectRound(
   pool: CandidatePool,
   excludedKeys: Iterable<string>,
-  { roundSize = defaultRoundSize, maxPerArtist = defaultRoundArtistLimit }: SelectRoundOptions = {},
+  { roundSize = defaultRoundSize, maxPerArtist = defaultRoundArtistLimit, artistFeedback }: SelectRoundOptions = {},
 ): Track[] {
-  const rankedEntries = rankEntries(pool);
+  const rankedEntries = rankEntries(pool, artistFeedback);
   const usedKeys = new Set(excludedKeys);
   const artistCounts = new Map<string, number>();
 
@@ -151,24 +227,32 @@ export type BuildPlaylistInput = {
   seed: Track;
   picks: Track[];
   pool: CandidatePool;
+  /** Songs to leave out even if the pool still ranks them, such as songs passed on in earlier rounds. */
+  excludedKeys?: Iterable<string>;
+  artistFeedback?: ArtistFeedback;
   size?: number;
   maxPerArtist?: number;
 };
 
 /**
  * The final playlist: the seed and every pick first, then the best-scoring songs
- * from the pool. Uses the same artist limit and fallback as selectRound.
+ * from the pool that the user never passed on, ranked with the artist feedback. Uses the same artist limit and
+ * fallback as selectRound. When the pool runs short, the playlist is shorter
+ * rather than padded with songs the user didn't want.
  */
 export function buildPlaylist({
   seed,
   picks,
   pool,
+  excludedKeys = [],
+  artistFeedback,
   size = defaultPlaylistSize,
   maxPerArtist = defaultPlaylistArtistLimit,
 }: BuildPlaylistInput): Track[] {
   const playlist: Track[] = [];
   const usedKeys = new Set<string>();
   const artistCounts = new Map<string, number>();
+  const leftOut = new Set(excludedKeys);
 
   for (const track of [seed, ...picks]) {
     if (playlist.length >= size || usedKeys.has(track.trackKey)) continue;
@@ -178,7 +262,7 @@ export function buildPlaylist({
     artistCounts.set(artistKey, (artistCounts.get(artistKey) ?? 0) + 1);
   }
 
-  const rankedEntries = rankEntries(pool);
+  const rankedEntries = rankEntries(pool, artistFeedback).filter((entry) => !leftOut.has(entry.track.trackKey));
   playlist.push(...takeWithArtistLimit(rankedEntries, size - playlist.length, usedKeys, artistCounts, maxPerArtist));
   if (playlist.length < size) {
     playlist.push(...takeWithArtistLimit(rankedEntries, size - playlist.length, usedKeys, artistCounts, Infinity));

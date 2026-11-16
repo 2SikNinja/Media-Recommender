@@ -20,16 +20,20 @@ export const createSessionSchema = z.object({
 
 const roundNumberSchema = z.number().int().min(1).max(10);
 
+const dislikedKeysSchema = z.array(z.string().min(3).max(500)).max(10, "can include at most 10 songs").default([]);
+
 export const submitPickSchema = z.object({
   roundNumber: roundNumberSchema,
   trackKeys: z
     .array(z.string().min(3).max(500))
     .min(1, "must include at least one song")
     .max(10, "can include at most 10 songs"),
+  dislikedKeys: dislikedKeysSchema,
 });
 
 export const rerollSchema = z.object({
   roundNumber: roundNumberSchema,
+  dislikedKeys: dislikedKeysSchema,
 });
 
 export const youtubeExportSchema = z.object({
