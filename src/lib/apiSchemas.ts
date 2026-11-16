@@ -36,9 +36,6 @@ export const rerollSchema = z.object({
   dislikedKeys: dislikedKeysSchema,
 });
 
-export const youtubeExportSchema = z.object({
-  shuffle: z.boolean().default(false),
-});
 
 export const playlistPositionSchema = z.coerce.number().int().min(1).max(50);
 

@@ -1,8 +1,8 @@
-import type { Playlist, YoutubeExport } from "./playlistService";
+import type { Playlist, YoutubeExport, YoutubeQueue } from "./playlistService";
 import type { SessionState } from "./sessionService";
 import type { Track } from "./tracks";
 
-export type { Playlist, SessionState, Track, YoutubeExport };
+export type { Playlist, SessionState, Track, YoutubeExport, YoutubeQueue };
 
 /** An API error with a message that's safe to show as-is. */
 export class ApiClientError extends Error {
@@ -88,11 +88,9 @@ export function setTrackRemoved(playlistId: string, position: number, removed: b
   });
 }
 
-export function exportToYoutube(playlistId: string, shuffle: boolean): Promise<YoutubeExport> {
-  return request(`/api/playlists/${encodeURIComponent(playlistId)}/export/youtube`, {
-    method: "POST",
-    body: JSON.stringify({ shuffle }),
-  });
+/** The playlist's YouTube links, in order and shuffled. */
+export function exportToYoutube(playlistId: string): Promise<YoutubeExport> {
+  return request(`/api/playlists/${encodeURIComponent(playlistId)}/export/youtube`, { method: "POST" });
 }
 
 export function errorMessage(error: unknown): string {

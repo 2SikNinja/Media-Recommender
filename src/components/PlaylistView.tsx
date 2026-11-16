@@ -3,15 +3,15 @@
 import { LoaderCircle, Play, RotateCcw, Shuffle, X } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import {
   errorMessage,
-  exportToYoutube,
   getPlaylist,
   setTrackRemoved,
   type Playlist,
   type YoutubeExport,
+  type YoutubeQueue,
 } from "@/lib/apiClient";
 import { saveToHistory } from "@/lib/history";
 
@@ -19,9 +19,15 @@ import { PreviewDisc } from "./PreviewDisc";
 import { PreviewPlayerProvider, usePreviewPlayer } from "./PreviewPlayer";
 import { ShareButton } from "./ShareButton";
 import { preloadAlbumArt } from "./RecordArt";
+import { usePreparedYoutubeLinks } from "./usePreparedYoutubeLinks";
 
 type ExportMode = "inOrder" | "shuffled";
 type PlaylistTrack = Playlist["tracks"][number];
+
+/** YouTube Music when YouTube gave us a queue for it, otherwise regular YouTube. */
+function queueUrl(queue: YoutubeQueue): string {
+  return queue.youtubeMusicUrl ?? queue.youtubeUrl;
+}
 
 /** Moves songs between the playing list and the removed list, keeping both in playlist order. */
 function withTrackRemoved(playlist: Playlist, track: PlaylistTrack, removed: boolean): Playlist {
@@ -50,13 +56,17 @@ function PlaylistViewContent() {
   const { playlistId } = useParams<{ playlistId: string }>();
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [exporting, setExporting] = useState<ExportMode | null>(null);
-  const [exportResult, setExportResult] = useState<YoutubeExport | null>(null);
+  // Set while a tap waits for links that weren't ready yet.
+  const [waiting, setWaiting] = useState<ExportMode | null>(null);
+  // The links last opened, for the note under the buttons.
+  const [opened, setOpened] = useState<{ mode: ExportMode; links: YoutubeExport } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const [lastRemoved, setLastRemoved] = useState<PlaylistTrack | null>(null);
   const [showRemoved, setShowRemoved] = useState(false);
   const { stop: stopPreview } = usePreviewPlayer();
+  const tracksKey = playlist ? playlist.tracks.map((track) => track.position).join(",") : null;
+  const { ready: youtubeLinks, getLinks } = usePreparedYoutubeLinks(playlistId, tracksKey);
 
   useEffect(() => {
     let isCurrent = true;
@@ -74,25 +84,33 @@ function PlaylistViewContent() {
     };
   }, [playlistId]);
 
-  async function play(mode: ExportMode) {
+  /** The links are ready, so the button is a plain link: note what was opened. */
+  function onOpened(mode: ExportMode, links: YoutubeExport) {
     stopPreview();
-    // Open the tab now, while the click still counts as a user action, so popup
-    // blockers allow it. It gets its address once the link is ready.
+    setExportError(null);
+    setOpened({ mode, links });
+  }
+
+  /** Tapped before the links were ready: open a tab now and fill it in when they arrive. */
+  async function playWhenReady(mode: ExportMode) {
+    stopPreview();
+    // Open the tab during the tap, while it still counts as a user action, so
+    // popup blockers allow it.
     const popup = window.open("about:blank", "_blank");
-    setExporting(mode);
+    setWaiting(mode);
     setExportError(null);
     try {
-      const result = await exportToYoutube(playlistId, mode === "shuffled");
-      setExportResult(result);
+      const links = await getLinks();
+      setOpened({ mode, links });
       if (popup) {
         popup.opener = null;
-        popup.location.href = result.youtubeMusicUrl ?? result.youtubeUrl;
+        popup.location.href = queueUrl(links[mode]);
       }
     } catch (error) {
       popup?.close();
       setExportError(errorMessage(error));
     } finally {
-      setExporting(null);
+      setWaiting(null);
     }
   }
 
@@ -130,8 +148,8 @@ function PlaylistViewContent() {
     setPlaylist(withTrackRemoved(playlist, track, removed));
     setLastRemoved(removed ? track : null);
     setEditError(null);
-    // The YouTube links no longer match the playlist.
-    setExportResult(null);
+    // The links being opened no longer match; new ones are prepared once edits settle.
+    setOpened(null);
     try {
       setPlaylist(await setTrackRemoved(playlistId, track.position, removed));
     } catch (error) {
@@ -159,7 +177,7 @@ function PlaylistViewContent() {
 
   // The seed is always the first song, even if it was taken out of the list.
   const seedTrack = [...playlist.tracks, ...playlist.removedTracks].sort((a, b) => a.position - b.position)[0];
-  const canRemove = playlist.tracks.length > 1 && exporting === null;
+  const canRemove = playlist.tracks.length > 1 && waiting === null;
 
   return (
     <section className="mx-auto w-full max-w-3xl pt-6 pb-20 sm:pt-10">
@@ -176,34 +194,28 @@ function PlaylistViewContent() {
       </div>
 
       <div className="mt-8 flex flex-wrap gap-3">
-        <button
-          type="button"
-          onClick={() => void play("inOrder")}
-          disabled={exporting !== null}
-          aria-busy={exporting === "inOrder"}
-          className="inline-flex items-center gap-2 rounded-full bg-accent px-6 py-3 font-medium text-on-accent hover:bg-accent-hover disabled:opacity-70"
-        >
-          {exporting === "inOrder" ? (
-            <LoaderCircle size={18} className="animate-spin" aria-hidden="true" />
-          ) : (
-            <Play size={18} fill="currentColor" aria-hidden="true" />
-          )}
-          {exporting === "inOrder" ? "Finding songs on YouTube…" : "Play on YouTube Music"}
-        </button>
-        <button
-          type="button"
-          onClick={() => void play("shuffled")}
-          disabled={exporting !== null}
-          aria-busy={exporting === "shuffled"}
-          className="inline-flex items-center gap-2 rounded-full border border-border px-6 py-3 font-medium hover:bg-surface disabled:opacity-70"
-        >
-          {exporting === "shuffled" ? (
-            <LoaderCircle size={18} className="animate-spin" aria-hidden="true" />
-          ) : (
-            <Shuffle size={18} aria-hidden="true" />
-          )}
-          Shuffle play
-        </button>
+        <PlayControl
+          mode="inOrder"
+          links={youtubeLinks}
+          waiting={waiting}
+          onOpened={onOpened}
+          onPlayWhenReady={playWhenReady}
+          className="bg-accent text-on-accent hover:bg-accent-hover"
+          icon={<Play size={18} fill="currentColor" aria-hidden="true" />}
+          label="Play on YouTube Music"
+          waitingLabel="Finding songs on YouTube…"
+        />
+        <PlayControl
+          mode="shuffled"
+          links={youtubeLinks}
+          waiting={waiting}
+          onOpened={onOpened}
+          onPlayWhenReady={playWhenReady}
+          className="border border-border hover:bg-surface"
+          icon={<Shuffle size={18} aria-hidden="true" />}
+          label="Shuffle play"
+          waitingLabel="Shuffle play"
+        />
         <ShareButton title={playlist.title} />
       </div>
 
@@ -213,33 +225,35 @@ function PlaylistViewContent() {
             {exportError}
           </p>
         )}
-        {exportResult && (
+        {opened && (
           <div className="mt-5 rounded-xl border border-border p-4 text-sm">
             <p>
-              Opened {exportResult.trackCount} songs in a new tab. If nothing opened, use{" "}
-              <a href={exportResult.youtubeMusicUrl ?? exportResult.youtubeUrl} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-4">
-                this link
-              </a>
-              {exportResult.youtubeMusicUrl ? (
+              Opened {opened.links.trackCount} songs in a new tab.
+              {opened.links[opened.mode].youtubeMusicUrl ? (
                 <>
                   {" "}
-                  or{" "}
-                  <a href={exportResult.youtubeUrl} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-4">
-                    open it on YouTube
+                  Tap Save in YouTube Music to keep it. Rather use YouTube?{" "}
+                  <a
+                    href={opened.links[opened.mode].youtubeUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent underline underline-offset-4"
+                  >
+                    Open it on YouTube
                   </a>
+                  .
                 </>
               ) : null}
-              .{exportResult.youtubeMusicUrl ? " Tap Save in YouTube Music to keep it." : ""}
             </p>
-            {exportResult.unresolvedTracks.length > 0 && (
+            {opened.links.unresolvedTracks.length > 0 && (
               <div className="mt-3 text-text-secondary">
                 <p>
-                  {exportResult.unresolvedTracks.length === 1
+                  {opened.links.unresolvedTracks.length === 1
                     ? "1 song wasn't found on YouTube, so it's not in the queue:"
-                    : `${exportResult.unresolvedTracks.length} songs weren't found on YouTube, so they're not in the queue:`}
+                    : `${opened.links.unresolvedTracks.length} songs weren't found on YouTube, so they're not in the queue:`}
                 </p>
                 <ul className="mt-1 list-inside list-disc">
-                  {exportResult.unresolvedTracks.map((track) => (
+                  {opened.links.unresolvedTracks.map((track) => (
                     <li key={track.position}>
                       {track.title} by {track.artist}
                     </li>
@@ -299,7 +313,7 @@ function PlaylistViewContent() {
                   <button
                     type="button"
                     onClick={() => void changeTrack(track, false)}
-                    disabled={exporting !== null}
+                    disabled={waiting !== null}
                     className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm hover:bg-surface disabled:opacity-50"
                   >
                     <RotateCcw size={14} aria-hidden="true" />
@@ -354,5 +368,54 @@ export function PlaylistSkeleton() {
         ))}
       </div>
     </section>
+  );
+}
+
+type PlayControlProps = {
+  mode: ExportMode;
+  /** The prepared links, or null while they're still being prepared. */
+  links: YoutubeExport | null;
+  waiting: ExportMode | null;
+  onOpened: (mode: ExportMode, links: YoutubeExport) => void;
+  onPlayWhenReady: (mode: ExportMode) => Promise<void>;
+  className: string;
+  icon: ReactNode;
+  label: string;
+  waitingLabel: string;
+};
+
+/**
+ * A play button. Once the links are ready it's a plain link, so it opens
+ * straight away and phones hand it to the YouTube Music app. Before that it's a
+ * button that opens a tab and fills it in when the links arrive.
+ */
+function PlayControl({ mode, links, waiting, onOpened, onPlayWhenReady, className, icon, label, waitingLabel }: PlayControlProps) {
+  const base = `inline-flex items-center gap-2 rounded-full px-6 py-3 font-medium ${className}`;
+  if (links) {
+    return (
+      <a
+        href={queueUrl(links[mode])}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={() => onOpened(mode, links)}
+        className={base}
+      >
+        {icon}
+        {label}
+      </a>
+    );
+  }
+  const isWaiting = waiting === mode;
+  return (
+    <button
+      type="button"
+      onClick={() => void onPlayWhenReady(mode)}
+      disabled={waiting !== null}
+      aria-busy={isWaiting}
+      className={`${base} disabled:opacity-70`}
+    >
+      {isWaiting ? <LoaderCircle size={18} className="animate-spin" aria-hidden="true" /> : icon}
+      {isWaiting ? waitingLabel : label}
+    </button>
   );
 }
