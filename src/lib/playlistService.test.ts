@@ -114,10 +114,10 @@ describe("setTrackRemoved", () => {
     const result = await exportPlaylistToYoutube(
       { db, resolver, fetchImpl: fakeYoutubeFetch(null) },
       playlistId,
-      { shuffle: false },
     );
     expect(result.trackCount).toBe(49);
-    expect(result.youtubeUrl).not.toContain(fakeVideoId(playlist.tracks[1].title));
+    expect(result.inOrder.youtubeUrl).not.toContain(fakeVideoId(playlist.tracks[1].title));
+    expect(result.shuffled.youtubeUrl).not.toContain(fakeVideoId(playlist.tracks[1].title));
   });
 });
 
@@ -130,43 +130,46 @@ describe("exportPlaylistToYoutube", () => {
     const result = await exportPlaylistToYoutube(
       { db, resolver, fetchImpl: fakeYoutubeFetch("TLGGabc123") },
       playlistId,
-      { shuffle: false },
     );
 
     expect(result.trackCount).toBe(49);
     expect(result.unresolvedTracks).toEqual([{ position: 4, artist: playlist.tracks[3].artist, title: missingTitle }]);
-    const videoIds = new URL(result.youtubeUrl).searchParams.get("video_ids")?.split(",");
+    const videoIds = new URL(result.inOrder.youtubeUrl).searchParams.get("video_ids")?.split(",");
     expect(videoIds?.[0]).toBe(fakeVideoId(playlist.tracks[0].title));
     expect(videoIds).toHaveLength(49);
-    expect(result.youtubeMusicUrl).toBe(`https://music.youtube.com/watch?v=${videoIds?.[0]}&list=TLGGabc123`);
+    expect(result.inOrder.youtubeMusicUrl).toBe(`https://music.youtube.com/watch?v=${videoIds?.[0]}&list=TLGGabc123`);
   });
 
   it("saves matches so the next export doesn't call the resolver for them", async () => {
     const resolver = createFakeResolver();
-    await exportPlaylistToYoutube({ db, resolver, fetchImpl: fakeYoutubeFetch(null) }, playlistId, { shuffle: false });
-    await exportPlaylistToYoutube({ db, resolver, fetchImpl: fakeYoutubeFetch(null) }, playlistId, { shuffle: true });
+    await exportPlaylistToYoutube({ db, resolver, fetchImpl: fakeYoutubeFetch(null) }, playlistId);
+    await exportPlaylistToYoutube({ db, resolver, fetchImpl: fakeYoutubeFetch(null) }, playlistId);
 
     expect(resolver).toHaveBeenCalledTimes(1);
     const cached = await db.query("select 1 from track_cache where youtube_video_id is not null");
     expect(cached).toHaveLength(50);
   });
 
-  it("shuffles the queue when asked", async () => {
+  it("builds an in-order and a shuffled queue from the same matches in one call", async () => {
     const resolver = createFakeResolver();
-    const inOrder = await exportPlaylistToYoutube({ db, resolver, fetchImpl: fakeYoutubeFetch(null) }, playlistId, {
-      shuffle: false,
-    });
-    const shuffledResult = await exportPlaylistToYoutube(
-      { db, resolver, fetchImpl: fakeYoutubeFetch(null), random: () => 0 },
+    const result = await exportPlaylistToYoutube(
+      { db, resolver, fetchImpl: fakeYoutubeFetch("TLGGboth"), random: () => 0 },
       playlistId,
-      { shuffle: true },
     );
 
-    const orderedIds = new URL(inOrder.youtubeUrl).searchParams.get("video_ids")?.split(",") ?? [];
-    const shuffledIds = new URL(shuffledResult.youtubeUrl).searchParams.get("video_ids")?.split(",") ?? [];
+    const orderedIds = new URL(result.inOrder.youtubeUrl).searchParams.get("video_ids")?.split(",") ?? [];
+    const shuffledIds = new URL(result.shuffled.youtubeUrl).searchParams.get("video_ids")?.split(",") ?? [];
     expect(shuffledIds).not.toEqual(orderedIds);
     expect([...shuffledIds].sort()).toEqual([...orderedIds].sort());
-    expect(shuffledResult.youtubeMusicUrl).toBeNull();
+    expect(result.shuffled.youtubeMusicUrl).toBe(`https://music.youtube.com/watch?v=${shuffledIds[0]}&list=TLGGboth`);
+    expect(resolver).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to YouTube links when YouTube Music doesn't hand back a queue", async () => {
+    const result = await exportPlaylistToYoutube({ db, resolver: createFakeResolver(), fetchImpl: fakeYoutubeFetch(null) }, playlistId);
+    expect(result.inOrder.youtubeMusicUrl).toBeNull();
+    expect(result.shuffled.youtubeMusicUrl).toBeNull();
+    expect(result.inOrder.youtubeUrl).toContain("watch_videos");
   });
 
   it("fails clearly when the resolver is down and nothing is cached", async () => {
@@ -174,7 +177,7 @@ describe("exportPlaylistToYoutube", () => {
       throw new ResolverError("down");
     });
     await expect(
-      exportPlaylistToYoutube({ db, resolver, fetchImpl: fakeYoutubeFetch(null) }, playlistId, { shuffle: false }),
+      exportPlaylistToYoutube({ db, resolver, fetchImpl: fakeYoutubeFetch(null) }, playlistId),
     ).rejects.toMatchObject({ code: "upstreamUnavailable" });
   });
 });

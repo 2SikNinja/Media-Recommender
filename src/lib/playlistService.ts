@@ -110,11 +110,18 @@ export async function setTrackRemoved(db: Db, playlistId: string, position: numb
   return getPlaylist(db, playlistId);
 }
 
-export type YoutubeExport = {
+export type YoutubeQueue = {
   /** Always works: opens the songs as a queue on YouTube. */
   youtubeUrl: string;
   /** The same queue in YouTube Music, when YouTube returned a temporary playlist ID. */
   youtubeMusicUrl: string | null;
+};
+
+export type YoutubeExport = {
+  /** The playlist in its order. */
+  inOrder: YoutubeQueue;
+  /** The same songs in a random order. */
+  shuffled: YoutubeQueue;
   trackCount: number;
   unresolvedTracks: Array<Pick<PlaylistTrack, "position" | "artist" | "title">>;
 };
@@ -129,16 +136,23 @@ export type ExportDeps = {
 type CachedMatchRow = { track_key: string; youtube_video_id: string; duration_seconds: number | null };
 type DurationRow = { track_key: string; duration_seconds: number | null };
 
+/** Builds the YouTube link for the videos and, when YouTube allows it, the YouTube Music one. */
+async function buildQueue(videoIds: string[], fetchImpl: typeof fetch): Promise<YoutubeQueue> {
+  const youtubeUrl = buildWatchVideosUrl(videoIds);
+  const temporaryPlaylistId = await fetchTemporaryPlaylistId(youtubeUrl, fetchImpl);
+  return {
+    youtubeUrl,
+    youtubeMusicUrl: temporaryPlaylistId ? buildYoutubeMusicUrl(videoIds[0], temporaryPlaylistId) : null,
+  };
+}
+
 /**
  * Finds a YouTube video for every song in the playlist (cache first, then the
- * resolver), saves the matches, and builds the links. Songs that can't be
- * matched are listed instead of failing the whole export.
+ * resolver), saves the matches, and builds the links for both play modes, so
+ * the page can have them ready before anyone taps. Songs that can't be matched
+ * are listed instead of failing the whole export.
  */
-export async function exportPlaylistToYoutube(
-  deps: ExportDeps,
-  playlistId: string,
-  options: { shuffle: boolean },
-): Promise<YoutubeExport> {
+export async function exportPlaylistToYoutube(deps: ExportDeps, playlistId: string): Promise<YoutubeExport> {
   const { db, resolver, fetchImpl = fetch, random = Math.random } = deps;
   const playlist = await getPlaylist(db, playlistId);
   const videoIdByKey = new Map<string, string>();
@@ -232,14 +246,15 @@ export async function exportPlaylistToYoutube(
     throw new ApiError("noSuggestions", "We couldn't find any of these songs on YouTube.");
   }
 
-  const orderedTracks = options.shuffle ? shuffled(playableTracks, random) : playableTracks;
-  const videoIds = orderedTracks.map((track) => videoIdByKey.get(track.trackKey) as string);
-  const youtubeUrl = buildWatchVideosUrl(videoIds);
-  const temporaryPlaylistId = await fetchTemporaryPlaylistId(youtubeUrl, fetchImpl);
+  const videoIds = playableTracks.map((track) => videoIdByKey.get(track.trackKey) as string);
+  const [inOrder, shuffledQueue] = await Promise.all([
+    buildQueue(videoIds, fetchImpl),
+    buildQueue(shuffled(videoIds, random), fetchImpl),
+  ]);
 
   return {
-    youtubeUrl,
-    youtubeMusicUrl: temporaryPlaylistId ? buildYoutubeMusicUrl(videoIds[0], temporaryPlaylistId) : null,
+    inOrder,
+    shuffled: shuffledQueue,
     trackCount: videoIds.length,
     unresolvedTracks: playlist.tracks
       .filter((track) => !videoIdByKey.has(track.trackKey))

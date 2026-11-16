@@ -114,7 +114,7 @@ All endpoints return JSON. Errors look like `{ "error": { "code": "conflict", "m
 | `GET` | `/api/preview?artist=&title=` | | Redirects to a 30-second preview clip (302), or 404 when there isn't one. Used directly as an audio source |
 | `GET` | `/api/playlists/:playlistId` | | `{ playlistId, sessionId, title, createdAt, tracks, removedTracks }`, songs in order |
 | `PATCH` | `/api/playlists/:playlistId/tracks/:position` | `{ removed: boolean }` | The updated playlist. Takes a song out, or puts it back in its place |
-| `POST` | `/api/playlists/:playlistId/export/youtube` | `{ shuffle?: boolean }` | `{ youtubeUrl, youtubeMusicUrl, trackCount, unresolvedTracks }` |
+| `POST` | `/api/playlists/:playlistId/export/youtube` | | `{ inOrder, shuffled, trackCount, unresolvedTracks }`, where `inOrder` and `shuffled` are each `{ youtubeUrl, youtubeMusicUrl }`. The playlist page calls this as soon as it opens, so Play and Shuffle play are ready before anyone taps |
 
 **Session state** has the shape `{ sessionId, status, seed, currentRound, totalRounds, candidates, picks, playlistId }`. `candidates` holds the songs for the current round, and each song is `{ trackKey, artist, title, durationSeconds, imageUrl }`.
 
@@ -128,7 +128,7 @@ Notes:
 - **Preview links expire.** Deezer signs them for about 15 minutes, so `/api/preview` looks them up each time and the CDN keeps the redirect only until just before it expires.
 - **Removed songs aren't deleted.** They're marked with `removed_at`, left out of the YouTube queue, and can be put back. The last song can't be removed.
 - **Every route is rate limited per client**, with limits per kind of request in `src/lib/rateLimit.ts`. Counts are kept in Postgres against a hashed IP, and requests are allowed if the counter can't be reached.
-- **The export only sends songs to the resolver that aren't cached yet**, and it saves new matches for 30 days. `youtubeMusicUrl` is `null` when YouTube doesn't hand back a temporary playlist ID. In that case, use `youtubeUrl`.
+- **The export only sends songs to the resolver that aren't cached yet**, and it saves new matches for 30 days. `youtubeMusicUrl` is `null` when YouTube doesn't hand back a temporary playlist ID. In that case, use `youtubeUrl`. Both orders come from one request: the songs are matched once and shuffled for the second link.
 
 ## Database
 

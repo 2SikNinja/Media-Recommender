@@ -23,8 +23,11 @@ export const rateLimits = {
   read: { limit: 120, windowSeconds: 60 },
   /** Removing songs and putting them back. */
   editPlaylist: { limit: 120, windowSeconds: 60 },
-  /** Opening in YouTube Music: up to 50 YouTube searches each. */
-  youtubeExport: { limit: 10, windowSeconds: 60 },
+  /**
+   * Preparing the YouTube links: on opening a playlist and after edits. Up to
+   * 50 YouTube searches the first time, then cached for 30 days.
+   */
+  youtubeExport: { limit: 20, windowSeconds: 60 },
   /** Covers and previews: a round shows 10 at once, and the CDN absorbs repeats. */
   media: { limit: 300, windowSeconds: 60 },
 } satisfies Record<string, Limit>;
