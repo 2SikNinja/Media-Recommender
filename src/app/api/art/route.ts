@@ -1,6 +1,6 @@
 import { getAlbumArtUrl, isAllowedArtUrl } from "@/lib/albumArt";
 import { toErrorResponse } from "@/lib/apiErrors";
-import { albumArtQuerySchema } from "@/lib/apiSchemas";
+import { trackQuerySchema } from "@/lib/apiSchemas";
 import { getDb } from "@/lib/db";
 import { findAlbumArt } from "@/lib/deezer";
 
@@ -14,7 +14,7 @@ const missingCacheControl = "public, max-age=3600, s-maxage=86400";
 export async function GET(request: Request) {
   try {
     const searchParams = new URL(request.url).searchParams;
-    const { artist, title } = albumArtQuerySchema.parse({
+    const { artist, title } = trackQuerySchema.parse({
       artist: searchParams.get("artist") ?? "",
       title: searchParams.get("title") ?? "",
     });

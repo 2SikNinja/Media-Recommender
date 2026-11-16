@@ -7,12 +7,22 @@ import { useEffect, useState, useTransition } from "react";
 
 import { ApiClientError, errorMessage, getSession, rerollRound, submitPick, type SessionState } from "@/lib/apiClient";
 
+import { PreviewPlayerProvider, usePreviewPlayer } from "./PreviewPlayer";
+import { preloadAlbumArt } from "./RecordArt";
 import { RoundProgress } from "./RoundProgress";
 import { TrackCard } from "./TrackCard";
 
 type PendingAction = "pick" | "reroll" | null;
 
 export function RoundPicker() {
+  return (
+    <PreviewPlayerProvider>
+      <RoundPickerContent />
+    </PreviewPlayerProvider>
+  );
+}
+
+function RoundPickerContent() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const router = useRouter();
   const [session, setSession] = useState<SessionState | null>(null);
@@ -24,17 +34,21 @@ export function RoundPicker() {
   const [isNavigating, startNavigation] = useTransition();
   const pending: PendingAction = pendingRequest ?? (isNavigating ? "pick" : null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const { stop: stopPreview } = usePreviewPlayer();
 
   useEffect(() => {
     let isCurrent = true;
     getSession(sessionId)
-      .then((state) => {
+      .then(async (state) => {
         if (!isCurrent) return;
         if (state.status === "complete" && state.playlistId) {
           router.replace(`/playlist/${state.playlistId}`);
           return;
         }
-        setSession(state);
+        // Keep the skeleton up until the covers are ready, so the discs don't
+        // flash in without them.
+        await preloadAlbumArt(state.candidates);
+        if (isCurrent) setSession(state);
       })
       .catch((error: unknown) => {
         if (isCurrent) setLoadError(errorMessage(error));
@@ -65,7 +79,7 @@ export function RoundPicker() {
   const isLastRound = roundNumber >= session.totalRounds;
   const pickCount = session.picks.length;
 
-  function applyState(next: SessionState) {
+  async function applyState(next: SessionState) {
     if (next.status === "complete" && next.playlistId) {
       const playlistId = next.playlistId;
       startNavigation(() => {
@@ -74,22 +88,25 @@ export function RoundPicker() {
       });
       return;
     }
+    // The current round stays up, busy, until the next round's covers are ready.
+    await preloadAlbumArt(next.candidates);
     setSession(next);
     setPendingRequest(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function runAction(action: Exclude<PendingAction, null>, call: () => Promise<SessionState>) {
+    stopPreview();
     setPendingRequest(action);
     setActionError(null);
     try {
-      applyState(await call());
+      await applyState(await call());
     } catch (error) {
       setPendingRequest(null);
       setActionError(errorMessage(error));
       // Someone else (another tab, a retry) moved the session on. Catch up.
       if (error instanceof ApiClientError && error.code === "conflict") {
-        getSession(sessionId).then(applyState, () => {});
+        getSession(sessionId).then(applyState).catch(() => {});
       }
     }
   }

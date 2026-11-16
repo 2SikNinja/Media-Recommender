@@ -76,7 +76,7 @@ async function callLastfm(method: string, params: Record<string, string>): Promi
   let response: Response;
   try {
     response = await fetch(url, {
-      headers: { "User-Agent": "Pickify/0.1 (github.com/2SikNinja/Media-Recommender)" },
+      headers: { "User-Agent": "Pickify/0.1 (github.com/2SikNinja/Pickify)" },
       signal: AbortSignal.timeout(requestTimeoutMs),
       cache: "no-store",
     });

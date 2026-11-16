@@ -1,5 +1,5 @@
 import type { Db } from "./dbTypes";
-import { isDeezerImageUrl } from "./deezer";
+import { isDeezerCdnUrl } from "./deezer";
 import { makeTrackKey } from "./tracks";
 
 const lastfmImageHosts = new Set(["lastfm.freetls.fastly.net", "lastfm-img.freetls.fastly.net"]);
@@ -11,7 +11,7 @@ const lastfmImageHosts = new Set(["lastfm.freetls.fastly.net", "lastfm-img.freet
  * as a redirect to arbitrary sites.
  */
 export function isAllowedArtUrl(value: unknown): value is string {
-  if (isDeezerImageUrl(value)) return true;
+  if (isDeezerCdnUrl(value)) return true;
   if (typeof value !== "string") return false;
   try {
     const url = new URL(value);

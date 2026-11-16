@@ -32,18 +32,20 @@ type RecordArtProps = {
   imageUrl?: string | null;
   size?: number;
   spinning?: boolean;
+  /** Load the cover right away instead of when it scrolls into view. */
+  eager?: boolean;
 };
 
 /**
  * A small vinyl record: grooved rings with the album cover as the center label.
- * Until the cover loads, or when there isn't one, the label shows the artist's
- * initials on a color picked from the artist's name.
+ * Covers are usually preloaded (see preloadAlbumArt), so they show straight
+ * away. While one is still loading the label is a plain color; only when a song
+ * has no cover does it show the artist's initials.
  */
-export function RecordArt({ artist, title, imageUrl, size = 56, spinning = false }: RecordArtProps) {
+export function RecordArt({ artist, title, imageUrl, size = 56, spinning = false, eager = false }: RecordArtProps) {
   const src = imageUrl ?? albumArtSrc(artist, title);
-  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  const hasCover = loadedSrc === src;
+  const hasCover = failedSrc !== src;
 
   const labelColor = labelColors[hashText(artist.toLowerCase()) % labelColors.length];
   const labelSize = Math.round(size * 0.62);
@@ -64,19 +66,17 @@ export function RecordArt({ artist, title, imageUrl, size = 56, spinning = false
         className="absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center overflow-hidden rounded-full font-display font-semibold text-white/90"
         style={{ width: labelSize, height: labelSize, background: labelColor, fontSize: Math.max(11, Math.round(labelSize * 0.34)) }}
       >
-        {initialsOf(artist)}
-        {failedSrc !== src && (
+        {hasCover ? (
           <img
             src={src}
             alt=""
-            loading="lazy"
+            loading={eager ? "eager" : "lazy"}
             decoding="async"
-            onLoad={() => setLoadedSrc(src)}
             onError={() => setFailedSrc(src)}
-            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${
-              hasCover ? "opacity-100" : "opacity-0"
-            }`}
+            className="absolute inset-0 h-full w-full object-cover"
           />
+        ) : (
+          initialsOf(artist)
         )}
         {/* Spindle hole over the cover, so it still reads as a record. Hidden over initials. */}
         {hasCover && (
@@ -85,4 +85,22 @@ export function RecordArt({ artist, title, imageUrl, size = 56, spinning = false
       </div>
     </div>
   );
+}
+
+/**
+ * Loads album covers into the browser cache, so the discs show them as soon as
+ * they render. Resolves when every cover has loaded or failed, or after
+ * `timeoutMs`, so one slow cover can't hold the page back.
+ */
+export function preloadAlbumArt(tracks: ReadonlyArray<{ artist: string; title: string; imageUrl?: string | null }>, timeoutMs = 2_500): Promise<void> {
+  const loads = tracks.map(
+    (track) =>
+      new Promise<void>((resolve) => {
+        const image = new Image();
+        image.onload = () => resolve();
+        image.onerror = () => resolve();
+        image.src = track.imageUrl ?? albumArtSrc(track.artist, track.title);
+      }),
+  );
+  return Promise.race([Promise.all(loads).then(() => undefined), new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))]);
 }
