@@ -87,6 +87,11 @@ export function getPlaylist(playlistId: string): Promise<Playlist> {
   return request(`/api/playlists/${encodeURIComponent(playlistId)}`);
 }
 
+/** Starts a new session with this playlist's seeds, rounds and length. */
+export function remixPlaylist(playlistId: string): Promise<SessionState> {
+  return request(`/api/playlists/${encodeURIComponent(playlistId)}/remix`, { method: "POST" });
+}
+
 export function setTrackRemoved(playlistId: string, position: number, removed: boolean): Promise<Playlist> {
   return request(`/api/playlists/${encodeURIComponent(playlistId)}/tracks/${position}`, {
     method: "PATCH",

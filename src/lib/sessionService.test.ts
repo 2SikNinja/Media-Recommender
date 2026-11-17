@@ -5,7 +5,15 @@ import { createTestDb } from "@/test/pgliteDb";
 
 import { ApiError } from "./apiErrors";
 import type { Db } from "./dbTypes";
-import { createSession, getSessionState, playlistTitle, rerollRound, submitPick, type SessionState } from "./sessionService";
+import {
+  createSession,
+  getSessionState,
+  playlistTitle,
+  remixPlaylist,
+  rerollRound,
+  submitPick,
+  type SessionState,
+} from "./sessionService";
 import type { MusicSource } from "./trackCache";
 import { makeTrackKey, type SimilarTrack } from "./tracks";
 
@@ -465,5 +473,36 @@ describe("rerollRound", () => {
     const state = await createSession(deps, seedInput);
     await pickFirst(state);
     await expectApiError(rerollRound(deps, state.sessionId, { roundNumber: 1 }), "conflict");
+  });
+});
+
+describe("remixPlaylist", () => {
+  async function finishedPlaylistId(): Promise<string> {
+    let state = await createSession(deps, {
+      seeds: [
+        { artist: "Seed Artist", title: "Seed Song" },
+        { artist: "Second Artist", title: "Second Song" },
+      ],
+      rounds: 2,
+      playlistSize: 25,
+    });
+    while (state.status === "picking") state = await pickFirst(state);
+    return state.playlistId as string;
+  }
+
+  it("starts a new session with the same seeds, rounds and length", async () => {
+    const playlistId = await finishedPlaylistId();
+    const original = await db.query<{ session_id: string }>("select session_id from playlists where id = $1", [playlistId]);
+
+    const remix = await remixPlaylist(deps, playlistId);
+
+    expect(remix.sessionId).not.toBe(original[0].session_id);
+    expect(remix).toMatchObject({ status: "picking", currentRound: 1, totalRounds: 2, playlistSize: 25, picks: [] });
+    expect(remix.seeds.map((seed) => seed.title)).toEqual(["Seed Song", "Second Song"]);
+    expect(remix.candidates).toHaveLength(10);
+  });
+
+  it("refuses a playlist that doesn't exist", async () => {
+    await expectApiError(remixPlaylist(deps, "00000000-0000-4000-8000-000000000000"), "notFound");
   });
 });
