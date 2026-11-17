@@ -366,7 +366,7 @@ function PlaylistViewContent() {
                 {pagePlayer.skippedPositions.has(track.position) ? "Can\u2019t play here. Try YouTube Music." : track.artist}
               </span>
               {track.reason && (
-                <span className="mt-0.5 block truncate text-xs text-text-secondary/80">{reasonText(track.reason)}</span>
+                <span className="mt-0.5 block truncate text-xs text-text-secondary">{reasonText(track.reason)}</span>
               )}
             </button>
             {canRemove && (
