@@ -39,6 +39,7 @@ describe("runMigrations", () => {
       "0006_artist_feedback.sql",
       "0007_start_options.sql",
       "0008_playlist_reasons.sql",
+      "0009_playlist_order.sql",
     ]);
     expect(await runMigrations(client)).toEqual([]);
 

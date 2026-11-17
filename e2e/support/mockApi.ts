@@ -174,6 +174,21 @@ export class MockApi {
       return this.json(route, this.playlist);
     }
 
+    if (path === `/api/playlists/${playlistId}/order` && method === "PUT") {
+      const { positions } = body as { positions: number[] };
+      const byPosition = new Map(this.playlist.tracks.map((track) => [track.position, track]));
+      this.playlist = { ...this.playlist, tracks: positions.flatMap((position) => byPosition.get(position) ?? []) };
+      return this.json(route, this.playlist);
+    }
+    if (path === `/api/playlists/${playlistId}/tracks` && method === "POST") {
+      const { artist, title } = body as { artist: string; title: string };
+      const all = [...this.playlist.tracks, ...this.playlist.removedTracks];
+      const position = Math.max(...all.map((track) => track.position)) + 1;
+      const added = { position, trackKey: `${artist}::${title}`.toLowerCase(), artist, title, youtubeVideoId: null, reason: { kind: "added" as const } };
+      this.playlist = { ...this.playlist, tracks: [...this.playlist.tracks, added] };
+      return this.json(route, this.playlist, 201);
+    }
+
     return this.json(route, { error: { code: "notFound", message: `No mock for ${method} ${path}` } }, 404);
   }
 }
