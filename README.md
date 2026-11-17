@@ -18,6 +18,7 @@ Pick a song you like. Pickify shows you 10 similar songs, you pick as many as yo
 - **Open in YouTube Music** too, with every song matched to a YouTube upload.
 - **Your playlists** are listed on the home page, saved in the browser without an account.
 - **Why this song?** Each playlist song says why it's there: your starting song, one you picked, or which of your picks it's similar to.
+- **Edit the order and add songs.** Drag songs by their handle, or move them with the keyboard (Space, arrow keys, Space). Add a song to the end from a search box under the list.
 - **Share links** show the playlist's name and the seed song's record in iMessage, Discord, Slack and other apps.
 - **Make my own** on any playlist starts fresh rounds from the same seed songs, with the same number of rounds and length, so a friend with your link can build their own version.
 
@@ -118,6 +119,8 @@ All endpoints return JSON. Errors look like `{ "error": { "code": "conflict", "m
 | `GET` | `/api/preview?artist=&title=` | | Redirects to a 30-second preview clip (302), or 404 when there isn't one. Used directly as an audio source |
 | `GET` | `/api/playlists/:playlistId` | | `{ playlistId, sessionId, title, createdAt, tracks, removedTracks }`, songs in order. Each song has a `reason`: the seed, a pick, or which picks it's similar to (null for older playlists) |
 | `PATCH` | `/api/playlists/:playlistId/tracks/:position` | `{ removed: boolean }` | The updated playlist. Takes a song out, or puts it back in its place |
+| `POST` | `/api/playlists/:playlistId/tracks` | `{ artist, title }` | `201` with the updated playlist. Adds the song at the end, or puts it back if it was removed. `409` if it's already playing |
+| `PUT` | `/api/playlists/:playlistId/order` | `{ positions: number[] }` | The updated playlist. Lists every playing song's position in the new order. `409` if it doesn't match the playlist |
 | `POST` | `/api/playlists/:playlistId/export/youtube` | | `{ queue, inOrder, shuffled, trackCount, unresolvedTracks }`. `queue` lists `{ position, videoId }` in playlist order for the on-page player; `inOrder` and `shuffled` are each `{ youtubeUrl, youtubeMusicUrl }`. The playlist page calls this as soon as it opens, so Play and Shuffle play are ready before anyone taps |
 | `POST` | `/api/playlists/:playlistId/remix` | | `201` with round 1 of a new session that uses the playlist's seed songs, number of rounds and length. Limited like starting a session |
 
