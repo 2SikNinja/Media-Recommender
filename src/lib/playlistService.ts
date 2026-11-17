@@ -3,6 +3,7 @@ import { ApiError } from "./apiErrors";
 import type { PlaylistReason } from "./candidatePool";
 import type { Db } from "./dbTypes";
 import { ResolverError, type Resolver } from "./resolverClient";
+import { makeTrackKey, normalizeText } from "./tracks";
 import {
   buildWatchVideosUrl,
   buildYoutubeMusicUrl,
@@ -50,7 +51,8 @@ export async function getPlaylist(db: Db, playlistId: string): Promise<Playlist>
     db.query<PlaylistRow>("select id, session_id, title, created_at from playlists where id = $1", [playlistId]),
     db.query<PlaylistTrackRow>(
       `select position, track_key, artist, title, youtube_video_id, reason, removed_at is not null as is_removed
-         from playlist_tracks where playlist_id = $1 order by position`,
+         from playlist_tracks where playlist_id = $1
+        order by coalesce(sort_order, position), position`,
       [playlistId],
     ),
   ]);
@@ -113,6 +115,83 @@ export async function setTrackRemoved(db: Db, playlistId: string, position: numb
   if (!result.updated) {
     throw new ApiError("conflict", "A playlist needs at least one song.");
   }
+  return getPlaylist(db, playlistId);
+}
+
+/** The most songs a playlist can hold, counting removed ones, since positions are never reused. */
+export const maxPlaylistPositions = 200;
+
+/**
+ * Adds a song to the end of the playlist. A song that was removed earlier is
+ * put back instead; one that's already playing is refused.
+ */
+export async function addTrack(db: Db, playlistId: string, song: { artist: string; title: string }): Promise<Playlist> {
+  const trackKey = makeTrackKey(song.artist, song.title);
+  if (!normalizeText(song.artist) || !normalizeText(song.title)) {
+    throw new ApiError("invalidRequest", "Enter a song title and artist with letters or numbers in them.");
+  }
+  const [, rows] = await db.transaction([
+    { text: "select 1 from playlists where id = $1 for update", params: [playlistId] },
+    {
+      text: `with existing as (
+       select position, removed_at from playlist_tracks where playlist_id = $1 and track_key = $2
+     ), next as (
+       select coalesce(max(position), 0) + 1 as position,
+              coalesce(max(coalesce(sort_order, position)), 0) + 1 as sort_order
+         from playlist_tracks where playlist_id = $1
+     ), restored as (
+       update playlist_tracks
+          set removed_at = null, sort_order = (select sort_order from next)
+        where playlist_id = $1 and track_key = $2 and removed_at is not null
+        returning 1
+     ), inserted as (
+       insert into playlist_tracks (playlist_id, position, sort_order, track_key, artist, title)
+       select $1, next.position, next.sort_order, $2, $3, $4
+         from next
+        where exists (select 1 from playlists where id = $1)
+          and not exists (select 1 from existing)
+          and next.position <= $5
+       returning 1
+     )
+     select exists (select 1 from existing where removed_at is null) as already_playing,
+            exists (select 1 from restored) as restored,
+            exists (select 1 from inserted) as inserted`,
+      params: [playlistId, trackKey, song.artist.slice(0, 200), song.title.slice(0, 200), maxPlaylistPositions],
+    },
+  ]);
+  const result = rows[0] as { already_playing: boolean; restored: boolean; inserted: boolean } | undefined;
+  if (result?.already_playing) throw new ApiError("conflict", "That song is already in this playlist.");
+  if (!result?.restored && !result?.inserted) {
+    // Either the playlist doesn't exist (getPlaylist says so) or it's full.
+    await getPlaylist(db, playlistId);
+    throw new ApiError("conflict", "This playlist can't hold any more songs.");
+  }
+  return getPlaylist(db, playlistId);
+}
+
+/**
+ * Puts the playing songs in a new order. `positions` must list every song in
+ * the playlist that isn't removed, exactly once. Removed songs keep their old
+ * place, so putting one back lands it about where it was.
+ */
+export async function reorderTracks(db: Db, playlistId: string, positions: number[]): Promise<Playlist> {
+  const current = await getPlaylist(db, playlistId);
+  const playing = new Set(current.tracks.map((track) => track.position));
+  const requested = new Set(positions);
+  if (requested.size !== positions.length || requested.size !== playing.size || positions.some((position) => !playing.has(position))) {
+    throw new ApiError("conflict", "The playlist changed. Reload the page and try again.");
+  }
+  await db.transaction([
+    { text: "select 1 from playlists where id = $1 for update", params: [playlistId] },
+    {
+      text: `update playlist_tracks set sort_order = moved.sort_order
+               from unnest($2::int[]) with ordinality as moved(position, sort_order)
+              where playlist_tracks.playlist_id = $1
+                and playlist_tracks.position = moved.position
+                and playlist_tracks.removed_at is null`,
+      params: [playlistId, positions],
+    },
+  ]);
   return getPlaylist(db, playlistId);
 }
 

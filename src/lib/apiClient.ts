@@ -99,6 +99,18 @@ export function setTrackRemoved(playlistId: string, position: number, removed: b
   });
 }
 
+export function addTrackToPlaylist(playlistId: string, song: { artist: string; title: string }): Promise<Playlist> {
+  return request(`/api/playlists/${encodeURIComponent(playlistId)}/tracks`, { method: "POST", body: JSON.stringify(song) });
+}
+
+/** Saves a new order: every playing song's position, in the order they should play. */
+export function reorderPlaylist(playlistId: string, positions: number[]): Promise<Playlist> {
+  return request(`/api/playlists/${encodeURIComponent(playlistId)}/order`, {
+    method: "PUT",
+    body: JSON.stringify({ positions }),
+  });
+}
+
 /** The playlist's YouTube links, in order and shuffled. */
 export function exportToYoutube(playlistId: string): Promise<YoutubeExport> {
   return request(`/api/playlists/${encodeURIComponent(playlistId)}/export/youtube`, { method: "POST" });

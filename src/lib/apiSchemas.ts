@@ -56,7 +56,14 @@ export const rerollSchema = z.object({
 });
 
 
-export const playlistPositionSchema = z.coerce.number().int().min(1).max(100);
+export const playlistPositionSchema = z.coerce.number().int().min(1).max(200);
+
+/** A song to add to a playlist: the same shape as a seed song. */
+export const addTrackSchema = seedSchema;
+
+export const reorderSchema = z.object({
+  positions: z.array(z.number().int().min(1).max(200)).min(1).max(200),
+});
 
 export const trackRemovalSchema = z.object({
   removed: z.boolean(),

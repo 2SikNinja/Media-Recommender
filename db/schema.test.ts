@@ -61,7 +61,7 @@ describe("schema", () => {
     );
   });
 
-  it("caps playlists at 100 positions with no repeated songs", async () => {
+  it("caps playlists at 200 positions (100 plus added songs) with no repeated songs", async () => {
     const sessionId = await createSession();
     const playlist = await db.query<{ id: string }>(
       "insert into playlists (session_id, title) values ($1, 'Test') returning id",
@@ -73,8 +73,8 @@ describe("schema", () => {
 
     await db.query(insertTrack, [playlistId, 1, "a::b"]);
     await expect(db.query(insertTrack, [playlistId, 2, "a::b"])).rejects.toThrow();
-    await db.query(insertTrack, [playlistId, 100, "a::c"]);
-    await expect(db.query(insertTrack, [playlistId, 101, "a::d"])).rejects.toThrow();
+    await db.query(insertTrack, [playlistId, 200, "a::c"]);
+    await expect(db.query(insertTrack, [playlistId, 201, "a::d"])).rejects.toThrow();
   });
 
   it("allows at most two extra seeds and a playlist of 10 to 100 songs", async () => {

@@ -4,7 +4,7 @@ import { createFakeMusicSource } from "@/test/fakeMusicSource";
 import { createTestDb } from "@/test/pgliteDb";
 
 import type { Db } from "./dbTypes";
-import { exportPlaylistToYoutube, getPlaylist, setTrackRemoved } from "./playlistService";
+import { addTrack, exportPlaylistToYoutube, getPlaylist, reorderTracks, setTrackRemoved } from "./playlistService";
 import { ResolverError, type ResolvedTrack, type Resolver } from "./resolverClient";
 import { createSession, submitPick } from "./sessionService";
 
@@ -182,5 +182,71 @@ describe("exportPlaylistToYoutube", () => {
     await expect(
       exportPlaylistToYoutube({ db, resolver, fetchImpl: fakeYoutubeFetch(null) }, playlistId),
     ).rejects.toMatchObject({ code: "upstreamUnavailable" });
+  });
+});
+
+describe("addTrack", () => {
+  it("adds a song to the end, and it stays there", async () => {
+    const before = await getPlaylist(db, playlistId);
+    const after = await addTrack(db, playlistId, { artist: "New Artist", title: "New Song" });
+
+    expect(after.tracks).toHaveLength(before.tracks.length + 1);
+    expect(after.tracks.at(-1)).toMatchObject({ artist: "New Artist", title: "New Song", position: 51 });
+    expect(after.tracks.slice(0, -1)).toEqual(before.tracks);
+    expect(await getPlaylist(db, playlistId)).toEqual(after);
+  });
+
+  it("refuses a song that's already playing", async () => {
+    const { tracks } = await getPlaylist(db, playlistId);
+    await expect(addTrack(db, playlistId, { artist: tracks[3].artist, title: tracks[3].title })).rejects.toMatchObject({
+      code: "conflict",
+    });
+  });
+
+  it("puts a removed song back at the end instead of adding it twice", async () => {
+    const { tracks } = await getPlaylist(db, playlistId);
+    await setTrackRemoved(db, playlistId, tracks[2].position, true);
+
+    const after = await addTrack(db, playlistId, { artist: tracks[2].artist, title: tracks[2].title });
+
+    expect(after.removedTracks).toEqual([]);
+    expect(after.tracks.at(-1)?.position).toBe(tracks[2].position);
+    expect(after.tracks).toHaveLength(tracks.length);
+  });
+
+  it("says when the playlist doesn't exist", async () => {
+    await expect(
+      addTrack(db, "00000000-0000-4000-8000-000000000000", { artist: "A", title: "B" }),
+    ).rejects.toMatchObject({ code: "notFound" });
+  });
+});
+
+describe("reorderTracks", () => {
+  it("saves a new order and keeps it", async () => {
+    const { tracks } = await getPlaylist(db, playlistId);
+    const positions = tracks.map((track) => track.position);
+    const moved = [positions[5], ...positions.filter((position) => position !== positions[5])];
+
+    const after = await reorderTracks(db, playlistId, moved);
+
+    expect(after.tracks.map((track) => track.position)).toEqual(moved);
+    expect((await getPlaylist(db, playlistId)).tracks.map((track) => track.position)).toEqual(moved);
+  });
+
+  it("refuses a list that doesn't match the playing songs", async () => {
+    const { tracks } = await getPlaylist(db, playlistId);
+    const positions = tracks.map((track) => track.position);
+    await expect(reorderTracks(db, playlistId, positions.slice(1))).rejects.toMatchObject({ code: "conflict" });
+    await expect(reorderTracks(db, playlistId, [positions[0], ...positions.slice(0, -1)])).rejects.toMatchObject({
+      code: "conflict",
+    });
+  });
+
+  it("can reverse the whole playlist", async () => {
+    const { tracks } = await getPlaylist(db, playlistId);
+    const reversed = tracks.map((track) => track.position).reverse();
+    await reorderTracks(db, playlistId, reversed);
+    const { tracks: after } = await getPlaylist(db, playlistId);
+    expect(after.map((track) => track.position)).toEqual(reversed);
   });
 });
