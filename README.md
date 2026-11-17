@@ -234,6 +234,8 @@ Each problem is sent at most once per 10 minutes, after the response has gone ou
 2. Run `npx vercel env add DISCORD_ALERT_WEBHOOK_URL production` and paste it, marked as sensitive. Or add it in the Vercel dashboard under Settings, Environment Variables, Production only.
 3. Redeploy production.
 
+**Daily cleanup:** a Vercel Cron job (`vercel.json`) calls `GET /api/cron/cleanup` once a day. It deletes unfinished sessions nobody has touched for 30 days, with their rounds, and rate-limit counters older than a day. Finished sessions stay, because their playlists can still be opened and shared. The route only runs with `Authorization: Bearer $CRON_SECRET`, which Vercel sends when `CRON_SECRET` is set in Production. Without it the route refuses every request.
+
 ## Theme
 
 Dark "teal pulse" theme, defined in `src/app/globals.css`. Use the Tailwind classes it creates, such as `bg-surface`, `text-accent`, `text-text-secondary` and `border-border`, instead of hex values.
