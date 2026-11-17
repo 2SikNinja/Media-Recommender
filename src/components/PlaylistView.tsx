@@ -18,6 +18,7 @@ import { saveToHistory } from "@/lib/history";
 import { PagePlayerProvider, PlayerDock, usePagePlayer, type QueueItem } from "./PagePlayer";
 import { PreviewDisc } from "./PreviewDisc";
 import { PreviewPlayerProvider, usePreviewPlayer } from "./PreviewPlayer";
+import { RemixButton } from "./RemixButton";
 import { ShareButton } from "./ShareButton";
 import { preloadAlbumArt } from "./RecordArt";
 import { usePreparedYoutubeLinks } from "./usePreparedYoutubeLinks";
@@ -290,6 +291,7 @@ function PlaylistViewContent() {
           waitingLabel="Finding songs on YouTube…"
         />
         <ShareButton title={playlist.title} />
+        <RemixButton playlistId={playlistId} />
       </div>
 
       <div aria-live="polite">
