@@ -250,6 +250,14 @@ Each problem is sent at most once per 10 minutes, after the response has gone ou
 
 **Daily cleanup:** a Vercel Cron job (`vercel.json`) calls `GET /api/cron/cleanup` once a day. It deletes unfinished sessions nobody has touched for 30 days, with their rounds, and rate-limit counters older than a day. Finished sessions stay, because their playlists can still be opened and shared. The route only runs with `Authorization: Bearer $CRON_SECRET`, which Vercel sends when `CRON_SECRET` is set in Production. Without it the route refuses every request.
 
+## Accessibility
+
+- **Keyboard:** every control can be reached and used with the keyboard, in a sensible order, with a visible teal focus ring. A "Skip to content" link is the first stop on every page. Rounds have shortcuts too: 1 to 0 pick, Shift+number previews, Enter goes to the next round.
+- **Screen readers:** buttons that only show an icon have labels that name the song ("Not for me: First Time by Slander"), live regions announce picks, removals and copied links, and decorative images are hidden.
+- **Contrast:** body text and secondary text pass WCAG AA on the dark theme (secondary text is 6.1:1).
+- **Motion:** spinning records and other animations stop when the system asks for reduced motion.
+- **Checked with** axe-core (WCAG 2.2 AA and best-practice rules) on the home, round, playlist, player and 404 pages at desktop and phone sizes, with no issues.
+
 ## Theme
 
 Dark "teal pulse" theme, defined in `src/app/globals.css`. Use the Tailwind classes it creates, such as `bg-surface`, `text-accent`, `text-text-secondary` and `border-border`, instead of hex values.
