@@ -70,6 +70,7 @@ export class MockApi {
       artist: track.artist,
       title: track.title,
       youtubeVideoId: null,
+      reason: index === 0 ? { kind: "seed" as const } : null,
     })),
     removedTracks: [],
   };
