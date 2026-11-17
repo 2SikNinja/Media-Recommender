@@ -8,6 +8,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   errorMessage,
   getPlaylist,
+  reorderPlaylist,
   setTrackRemoved,
   type Playlist,
   type YoutubeExport,
@@ -16,11 +17,13 @@ import {
 import { saveToHistory } from "@/lib/history";
 import { reasonText } from "@/lib/reasonText";
 
+import { AddSongPanel } from "./AddSongPanel";
 import { PagePlayerProvider, PlayerDock, usePagePlayer, type QueueItem } from "./PagePlayer";
 import { PreviewDisc } from "./PreviewDisc";
 import { PreviewPlayerProvider, usePreviewPlayer } from "./PreviewPlayer";
 import { RemixButton } from "./RemixButton";
 import { ShareButton } from "./ShareButton";
+import { SortableTrackList } from "./SortableTrackList";
 import { preloadAlbumArt } from "./RecordArt";
 import { usePreparedYoutubeLinks } from "./usePreparedYoutubeLinks";
 
@@ -213,6 +216,28 @@ function PlaylistViewContent() {
     }
   }
 
+  /** Shows the new order right away and saves it; puts the old order back if saving fails. */
+  async function reorder(positions: number[]) {
+    if (!playlist) return;
+    const previous = playlist;
+    const byPosition = new Map(playlist.tracks.map((track) => [track.position, track]));
+    setPlaylist({ ...playlist, tracks: positions.flatMap((position) => byPosition.get(position) ?? []) });
+    setEditError(null);
+    setOpened(null);
+    try {
+      setPlaylist(await reorderPlaylist(playlistId, positions));
+    } catch (error) {
+      setPlaylist(previous);
+      setEditError(errorMessage(error));
+    }
+  }
+
+  function onSongAdded(updated: Playlist) {
+    setPlaylist(updated);
+    setEditError(null);
+    setOpened(null);
+  }
+
   if (loadError) {
     return (
       <div className="mx-auto max-w-xl pt-16">
@@ -232,6 +257,7 @@ function PlaylistViewContent() {
   // The seed is always the first song, even if it was taken out of the list.
   const seedTrack = [...playlist.tracks, ...playlist.removedTracks].sort((a, b) => a.position - b.position)[0];
   const canRemove = playlist.tracks.length > 1 && waiting === null;
+  const canReorder = playlist.tracks.length > 1 && waiting === null;
   const nowPlayingPosition = pagePlayer.queue?.[pagePlayer.currentIndex]?.position ?? null;
   const playablePositions = youtubeLinks ? new Set(youtubeLinks.queue.map((item) => item.position)) : null;
   const playerOpen = pagePlayer.queue !== null;
@@ -341,9 +367,12 @@ function PlaylistViewContent() {
         )}
       </div>
 
-      <ol className="mt-10 flex flex-col">
-        {playlist.tracks.map((track, index) => (
-          <li key={track.position} className="group flex items-center gap-4 border-b border-border/60 py-3 last:border-b-0">
+      <SortableTrackList
+        tracks={playlist.tracks}
+        canReorder={canReorder}
+        onReorder={(positions) => void reorder(positions)}
+        renderRow={(track, index) => (
+          <>
             <span className="flex w-6 shrink-0 justify-end text-sm text-text-secondary tabular-nums">
               {track.position === nowPlayingPosition ? (
                 <AudioLines size={16} className="text-accent" aria-label="Now playing" />
@@ -380,9 +409,11 @@ function PlaylistViewContent() {
                 <X size={18} aria-hidden="true" />
               </button>
             )}
-          </li>
-        ))}
-      </ol>
+          </>
+        )}
+      />
+
+      <AddSongPanel playlistId={playlistId} onAdded={onSongAdded} />
 
       {playlist.removedTracks.length > 0 && (
         <div className="mt-6 rounded-xl border border-border">
