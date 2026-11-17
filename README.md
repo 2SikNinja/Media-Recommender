@@ -4,7 +4,7 @@ Pick a song you like. Pickify shows you 10 similar songs, you pick as many as yo
 
 **Live at [pickify.ppeternnguyen.com](https://pickify.ppeternnguyen.com)**
 
-![Searching for a seed song, previewing and picking songs over five rounds, and the finished playlist](docs/screenshots/demo.gif)
+![Searching for a seed song, picking Quick rounds and a 25-song playlist, previewing and picking songs over three rounds, and the finished playlist](docs/screenshots/demo.gif)
 
 ## Features
 
