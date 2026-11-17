@@ -15,6 +15,12 @@ export type PoolEntry = {
   /** How many seed or picked songs listed this one as similar. */
   hits: number;
   /**
+   * The keys of the seed or picked songs that listed this one as similar, in
+   * the order they did, kept to the last few. Missing in pools saved before
+   * this was recorded.
+   */
+  from?: string[];
+  /**
    * Set when the user passed on this song: it was shown in a round and not
    * picked, or swapped out with "none of these". It stays out of later rounds
    * and the playlist for good.
@@ -53,7 +59,25 @@ export function pickWeight(roundNumber: number): number {
   return 1 + 0.25 * Math.max(roundNumber, 0);
 }
 
-export function addSimilarTracks(pool: CandidatePool, similarTracks: SimilarTrack[], weight = 1): CandidatePool {
+/** How many suggesting songs each pool entry remembers. */
+const maxSources = 6;
+
+function withSource(from: string[] | undefined, sourceKey: string | undefined): string[] | undefined {
+  if (!sourceKey) return from;
+  const others = (from ?? []).filter((key) => key !== sourceKey);
+  return [...others, sourceKey].slice(-maxSources);
+}
+
+/**
+ * Merges in the songs Last.fm lists as similar to one song. `sourceKey` is that
+ * song's key, remembered on each entry so the playlist can say why a song is in it.
+ */
+export function addSimilarTracks(
+  pool: CandidatePool,
+  similarTracks: SimilarTrack[],
+  weight = 1,
+  sourceKey?: string,
+): CandidatePool {
   const nextPool: CandidatePool = { ...pool };
   for (const similarTrack of similarTracks) {
     const { match, ...track } = similarTrack;
@@ -68,8 +92,9 @@ export function addSimilarTracks(pool: CandidatePool, similarTracks: SimilarTrac
           },
           score: existingEntry.score + match * weight,
           hits: existingEntry.hits + 1,
+          ...(sourceKey ? { from: withSource(existingEntry.from, sourceKey) } : {}),
         }
-      : { track, score: match * weight, hits: 1 };
+      : { track, score: match * weight, hits: 1, ...(sourceKey ? { from: [sourceKey] } : {}) };
   }
   return nextPool;
 }
@@ -269,4 +294,43 @@ export function buildPlaylist({
     playlist.push(...takeWithArtistLimit(rankedEntries, size - playlist.length, usedKeys, artistCounts, Infinity));
   }
   return playlist;
+}
+
+/** Why a song is in a playlist, shown under it. */
+export type PlaylistReason =
+  | { kind: "seed" }
+  | { kind: "pick" }
+  | { kind: "similar"; to: Array<{ artist: string; title: string; kind: "seed" | "pick" }> };
+
+/** How many songs a "similar" reason names at most. */
+const maxReasonSongs = 2;
+
+/**
+ * Explains each playlist song: the seed, one of the picks, or similar to which
+ * of them. Picks are named before seeds, latest first, since they say more
+ * about the user's taste. Null when the pool doesn't know (older sessions).
+ */
+export function playlistReasons(
+  playlist: Track[],
+  { seeds, picks, pool }: { seeds: Track[]; picks: Track[]; pool: CandidatePool },
+): Array<PlaylistReason | null> {
+  const seedKeys = new Set(seeds.map((track) => track.trackKey));
+  const pickKeys = new Set(picks.map((track) => track.trackKey));
+  const byKey = new Map([...seeds, ...picks].map((track) => [track.trackKey, track]));
+
+  return playlist.map((track) => {
+    if (seedKeys.has(track.trackKey)) return { kind: "seed" };
+    if (pickKeys.has(track.trackKey)) return { kind: "pick" };
+    const from = pool[track.trackKey]?.from ?? [];
+    const named = [...from]
+      .reverse()
+      .filter((key) => byKey.has(key))
+      .sort((a, b) => Number(seedKeys.has(a)) - Number(seedKeys.has(b)))
+      .slice(0, maxReasonSongs)
+      .map((key) => {
+        const source = byKey.get(key) as Track;
+        return { artist: source.artist, title: source.title, kind: seedKeys.has(key) ? ("seed" as const) : ("pick" as const) };
+      });
+    return named.length > 0 ? { kind: "similar", to: named } : null;
+  });
 }

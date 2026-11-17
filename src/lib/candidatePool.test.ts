@@ -6,6 +6,7 @@ import {
   buildPlaylist,
   dislikeWeight,
   pickWeight,
+  playlistReasons,
   rejectSkipped,
   rejectTracks,
   selectRound,
@@ -245,5 +246,56 @@ describe("rejectTracks", () => {
     const pool = rejectTracks({}, [makeTrack("A", "Unknown")]);
     expect(pool[makeTrackKey("A", "Unknown")].rejected).toBe(true);
     expect(selectRound(pool, [])).toEqual([]);
+  });
+});
+
+describe("suggestion sources", () => {
+  it("remembers which songs suggested each entry, without repeats", () => {
+    let pool = addSimilarTracks({}, [makeSimilar("A", "Shared", 0.5)], 1, "seed::one");
+    pool = addSimilarTracks(pool, [makeSimilar("A", "Shared", 0.5)], 1, "pick::two");
+    pool = addSimilarTracks(pool, [makeSimilar("A", "Shared", 0.5)], 1, "seed::one");
+    expect(pool[makeTrackKey("A", "Shared")].from).toEqual(["pick::two", "seed::one"]);
+  });
+
+  it("leaves sources out when none is given", () => {
+    const pool = addSimilarTracks({}, [makeSimilar("A", "Song", 0.5)]);
+    expect(pool[makeTrackKey("A", "Song")].from).toBeUndefined();
+  });
+});
+
+describe("playlistReasons", () => {
+  const seed = makeTrack("Illenium", "Feel Something");
+  const firstPick = makeTrack("Slander", "First Time");
+  const laterPick = makeTrack("Dabin", "Hollow");
+
+  it("names the seed, the picks, and what each other song is similar to", () => {
+    let pool = addSimilarTracks({}, [makeSimilar("Zedd", "Clarity", 0.9)], 1, seed.trackKey);
+    pool = addSimilarTracks(pool, [makeSimilar("Zedd", "Clarity", 0.9), makeSimilar("Kaskade", "Atmosphere", 0.8)], 1, firstPick.trackKey);
+    pool = addSimilarTracks(pool, [makeSimilar("Zedd", "Clarity", 0.9)], 1, laterPick.trackKey);
+    const playlist = [seed, firstPick, laterPick, makeTrack("Zedd", "Clarity"), makeTrack("Kaskade", "Atmosphere")];
+
+    expect(playlistReasons(playlist, { seeds: [seed], picks: [firstPick, laterPick], pool })).toEqual([
+      { kind: "seed" },
+      { kind: "pick" },
+      { kind: "pick" },
+      {
+        kind: "similar",
+        to: [
+          { artist: "Dabin", title: "Hollow", kind: "pick" },
+          { artist: "Slander", title: "First Time", kind: "pick" },
+        ],
+      },
+      { kind: "similar", to: [{ artist: "Slander", title: "First Time", kind: "pick" }] },
+    ]);
+  });
+
+  it("falls back to the seed, and to nothing when the pool doesn't know", () => {
+    const pool = addSimilarTracks({}, [makeSimilar("Zedd", "Clarity", 0.9)], 1, seed.trackKey);
+    const playlist = [makeTrack("Zedd", "Clarity"), makeTrack("Old", "Entry")];
+
+    expect(playlistReasons(playlist, { seeds: [seed], picks: [], pool })).toEqual([
+      { kind: "similar", to: [{ artist: "Illenium", title: "Feel Something", kind: "seed" }] },
+      null,
+    ]);
   });
 });

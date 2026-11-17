@@ -4,6 +4,7 @@ import {
   buildPlaylist,
   dislikeWeight,
   pickWeight,
+  playlistReasons,
   rejectSkipped,
   rejectTracks,
   selectRound,
@@ -238,9 +239,10 @@ export async function createSession(deps: SessionDeps, input: CreateSessionInput
   // Each seed adds its similar songs, so songs close to all of them rise to the
   // top and the rounds start as a blend.
   let pool: CandidatePool = {};
-  for (const similarTracks of await lookupSimilar(db, musicSource, seeds)) {
-    pool = addSimilarTracks(pool, similarTracks, pickWeight(0));
-  }
+  const seedSimilar = await lookupSimilar(db, musicSource, seeds);
+  seedSimilar.forEach((similarTracks, index) => {
+    pool = addSimilarTracks(pool, similarTracks, pickWeight(0), seeds[index].trackKey);
+  });
   const candidates = selectRound(pool, seeds.map((seed) => seed.trackKey));
   if (candidates.length < minimumFirstRoundSize) {
     throw new ApiError(
@@ -338,9 +340,9 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
     lookupSimilar(db, musicSource, dislikedTracks),
   ]);
   let scoredPool = session.candidate_pool;
-  for (const similarTracks of pickedSimilar) {
-    scoredPool = addSimilarTracks(scoredPool, similarTracks, pickWeight(input.roundNumber));
-  }
+  pickedSimilar.forEach((similarTracks, index) => {
+    scoredPool = addSimilarTracks(scoredPool, similarTracks, pickWeight(input.roundNumber), pickedTracksThisRound[index].trackKey);
+  });
   const eachSkipWeight = skipWeight(input.roundNumber, pickedTracksThisRound.length, skippedTracks.length);
   for (const similarTracks of skippedSimilar) {
     scoredPool = subtractSimilarTracks(scoredPool, similarTracks, eachSkipWeight);
@@ -391,15 +393,17 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
     });
   } else {
     const seeds = seedsFromRow(session);
+    const allPicks = [...pickedTracks(rounds), ...pickedTracksThisRound];
     const playlistTracks = buildPlaylist({
       seeds,
       size: session.playlist_size,
-      picks: [...pickedTracks(rounds), ...pickedTracksThisRound],
+      picks: allPicks,
       pool: nextPool,
       // Also covers sessions started before skipped songs were marked in the pool.
       excludedKeys: skippedKeys(rounds, requestedKeySet),
       artistFeedback,
     });
+    const reasons = playlistReasons(playlistTracks, { seeds, picks: allPicks, pool: nextPool });
     const playlistId = createId();
     statements.push(
       {
@@ -410,9 +414,9 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
         params: [playlistId, sessionId, playlistTitle(seeds)],
       },
       {
-        text: `insert into playlist_tracks (playlist_id, position, track_key, artist, title)
-               select $1, entry.position, entry.track_key, entry.artist, entry.title
-                 from jsonb_to_recordset($2::jsonb) as entry(position int, track_key text, artist text, title text)
+        text: `insert into playlist_tracks (playlist_id, position, track_key, artist, title, reason)
+               select $1, entry.position, entry.track_key, entry.artist, entry.title, entry.reason
+                 from jsonb_to_recordset($2::jsonb) as entry(position int, track_key text, artist text, title text, reason jsonb)
                 where exists (select 1 from playlists where id = $1)`,
         params: [
           playlistId,
@@ -422,6 +426,7 @@ export async function submitPick(deps: SessionDeps, sessionId: string, input: Su
               track_key: track.trackKey,
               artist: track.artist,
               title: track.title,
+              reason: reasons[index],
             })),
           ),
         ],

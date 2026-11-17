@@ -38,6 +38,7 @@ describe("runMigrations", () => {
       "0005_rate_limits.sql",
       "0006_artist_feedback.sql",
       "0007_start_options.sql",
+      "0008_playlist_reasons.sql",
     ]);
     expect(await runMigrations(client)).toEqual([]);
 

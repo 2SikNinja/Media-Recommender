@@ -506,3 +506,19 @@ describe("remixPlaylist", () => {
     await expectApiError(remixPlaylist(deps, "00000000-0000-4000-8000-000000000000"), "notFound");
   });
 });
+
+describe("playlist reasons", () => {
+  it("saves why each song is in the finished playlist", async () => {
+    let state = await createSession(deps, { ...seedInput, rounds: 1 });
+    state = await pickFirst(state);
+    const playlistId = state.playlistId as string;
+
+    const rows = await db.query<{ position: number; reason: { kind: string } | null }>(
+      "select position, reason from playlist_tracks where playlist_id = $1 order by position",
+      [playlistId],
+    );
+    expect(rows[0].reason).toEqual({ kind: "seed" });
+    expect(rows[1].reason).toEqual({ kind: "pick" });
+    expect(rows.slice(2).every((row) => row.reason?.kind === "similar")).toBe(true);
+  });
+});

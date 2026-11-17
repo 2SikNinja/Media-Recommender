@@ -14,6 +14,7 @@ import {
   type YoutubeQueue,
 } from "@/lib/apiClient";
 import { saveToHistory } from "@/lib/history";
+import { reasonText } from "@/lib/reasonText";
 
 import { PagePlayerProvider, PlayerDock, usePagePlayer, type QueueItem } from "./PagePlayer";
 import { PreviewDisc } from "./PreviewDisc";
@@ -364,6 +365,9 @@ function PlaylistViewContent() {
               <span className="block truncate text-sm text-text-secondary">
                 {pagePlayer.skippedPositions.has(track.position) ? "Can\u2019t play here. Try YouTube Music." : track.artist}
               </span>
+              {track.reason && (
+                <span className="mt-0.5 block truncate text-xs text-text-secondary">{reasonText(track.reason)}</span>
+              )}
             </button>
             {canRemove && (
               <button
