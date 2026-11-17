@@ -18,6 +18,7 @@ Pick a song you like. Pickify shows you 10 similar songs, you pick as many as yo
 - **Open in YouTube Music** too, with every song matched to a YouTube upload.
 - **Your playlists** are listed on the home page, saved in the browser without an account.
 - **Share links** show the playlist's name and the seed song's record in iMessage, Discord, Slack and other apps.
+- **Make my own** on any playlist starts fresh rounds from the same seed songs, with the same number of rounds and length, so a friend with your link can build their own version.
 
 | Picking songs | The playlist |
 | --- | --- |
@@ -117,6 +118,7 @@ All endpoints return JSON. Errors look like `{ "error": { "code": "conflict", "m
 | `GET` | `/api/playlists/:playlistId` | | `{ playlistId, sessionId, title, createdAt, tracks, removedTracks }`, songs in order |
 | `PATCH` | `/api/playlists/:playlistId/tracks/:position` | `{ removed: boolean }` | The updated playlist. Takes a song out, or puts it back in its place |
 | `POST` | `/api/playlists/:playlistId/export/youtube` | | `{ queue, inOrder, shuffled, trackCount, unresolvedTracks }`. `queue` lists `{ position, videoId }` in playlist order for the on-page player; `inOrder` and `shuffled` are each `{ youtubeUrl, youtubeMusicUrl }`. The playlist page calls this as soon as it opens, so Play and Shuffle play are ready before anyone taps |
+| `POST` | `/api/playlists/:playlistId/remix` | | `201` with round 1 of a new session that uses the playlist's seed songs, number of rounds and length. Limited like starting a session |
 
 **Session state** has the shape `{ sessionId, status, seed, seeds, playlistSize, currentRound, totalRounds, candidates, picks, playlistId }`. `candidates` holds the songs for the current round, and each song is `{ trackKey, artist, title, durationSeconds, imageUrl }`.
 
