@@ -36,6 +36,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${bricolage.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
+        {/* The first thing keyboard users reach: jumps past the header to the page itself. */}
+        <a
+          href="#content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-full focus:bg-accent focus:px-4 focus:py-2 focus:font-medium focus:text-on-accent"
+        >
+          Skip to content
+        </a>
         <header className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-5 py-5 sm:px-8">
           <Link href="/" className="flex items-center gap-2.5 rounded-md text-text-primary">
             <Image src="/logo.svg" alt="" width={34} height={34} priority />
@@ -44,7 +51,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <VolumeControl />
         </header>
 
-        <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-5 pb-16 sm:px-8">{children}</main>
+        <main id="content" tabIndex={-1} className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-5 pb-16 outline-none sm:px-8">{children}</main>
 
         <footer className="mx-auto w-full max-w-5xl px-5 py-6 text-sm text-text-secondary sm:px-8">
           Song suggestions from{" "}
