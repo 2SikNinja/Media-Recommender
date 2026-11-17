@@ -208,6 +208,18 @@ npm run testWatch   # rerun on save
 
 The tests cover the candidate pool, sessions and picks, playlists and the YouTube export, the Last.fm, Deezer and resolver clients (with mocked APIs), rate limiting, browser history, the migration script and the database schema. The database tests run in an in-memory Postgres, so you don't need a Neon database to run them.
 
+**Browser tests** use Playwright on a desktop and a phone-sized screen. They run against a production build with every `/api` call answered by a fake API in the browser (`e2e/support/mockApi.ts`) and a stand-in YouTube player, so they need no database, Last.fm or YouTube:
+
+```bash
+npx playwright install chromium   # once
+npm run build
+npm run testBrowser
+```
+
+They walk through a whole session from search to playlist, "None of these" and "Not for me", playing on the page, removing and undoing, the YouTube links being prepared, the volume being remembered, and every page fitting a phone screen without scrolling sideways.
+
+**CI:** GitHub Actions (`.github/workflows/ci.yml`) runs the typecheck, lint and unit tests, and the browser tests, on every pull request and push to master. When the browser tests fail, the report with screenshots and traces is attached to the run.
+
 ## Deploying
 
 Pushing to `master` deploys both Vercel projects:
