@@ -300,6 +300,7 @@ export function buildPlaylist({
 export type PlaylistReason =
   | { kind: "seed" }
   | { kind: "pick" }
+  | { kind: "added" }
   | { kind: "similar"; to: Array<{ artist: string; title: string; kind: "seed" | "pick" }> };
 
 /** How many songs a "similar" reason names at most. */

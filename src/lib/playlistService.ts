@@ -145,8 +145,8 @@ export async function addTrack(db: Db, playlistId: string, song: { artist: strin
         where playlist_id = $1 and track_key = $2 and removed_at is not null
         returning 1
      ), inserted as (
-       insert into playlist_tracks (playlist_id, position, sort_order, track_key, artist, title)
-       select $1, next.position, next.sort_order, $2, $3, $4
+       insert into playlist_tracks (playlist_id, position, sort_order, track_key, artist, title, reason)
+       select $1, next.position, next.sort_order, $2, $3, $4, '{"kind": "added"}'::jsonb
          from next
         where exists (select 1 from playlists where id = $1)
           and not exists (select 1 from existing)

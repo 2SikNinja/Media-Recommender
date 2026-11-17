@@ -6,6 +6,7 @@ describe("reasonText", () => {
   it("describes seeds and picks", () => {
     expect(reasonText({ kind: "seed" })).toBe("Your starting song");
     expect(reasonText({ kind: "pick" })).toBe("You picked this");
+    expect(reasonText({ kind: "added" })).toBe("You added this");
   });
 
   it("names the picks a song is similar to", () => {

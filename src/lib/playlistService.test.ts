@@ -191,7 +191,12 @@ describe("addTrack", () => {
     const after = await addTrack(db, playlistId, { artist: "New Artist", title: "New Song" });
 
     expect(after.tracks).toHaveLength(before.tracks.length + 1);
-    expect(after.tracks.at(-1)).toMatchObject({ artist: "New Artist", title: "New Song", position: 51 });
+    expect(after.tracks.at(-1)).toMatchObject({
+      artist: "New Artist",
+      title: "New Song",
+      position: 51,
+      reason: { kind: "added" },
+    });
     expect(after.tracks.slice(0, -1)).toEqual(before.tracks);
     expect(await getPlaylist(db, playlistId)).toEqual(after);
   });
