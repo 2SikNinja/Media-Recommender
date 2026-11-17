@@ -4,7 +4,7 @@ Pick a song you like. Pickify shows you 10 similar songs, you pick as many as yo
 
 **Live at [pickify.ppeternnguyen.com](https://pickify.ppeternnguyen.com)**
 
-![Searching for a seed song, previewing and picking songs over five rounds, and the finished playlist](docs/screenshots/demo.gif)
+![Searching for a seed song, picking Quick rounds and a 25-song playlist, previewing and picking songs over three rounds, and the finished playlist](docs/screenshots/demo.gif)
 
 ## Features
 
@@ -21,11 +21,11 @@ Pick a song you like. Pickify shows you 10 similar songs, you pick as many as yo
 
 | Picking songs | The playlist |
 | --- | --- |
-| ![A round of 10 songs with two picked and one preview playing](docs/screenshots/round.png) | ![A finished 50-song playlist with Play, Shuffle play and Share](docs/screenshots/playlist.png) |
+| ![A round of 10 songs with two picked and one preview playing](docs/screenshots/round.png) | ![A finished playlist with Play, Shuffle, Open in YouTube Music and Share](docs/screenshots/playlist.png) |
 
 | Search | On a phone |
 | --- | --- |
-| ![The home page with search results for Midnight City](docs/screenshots/home.png) | <img src="docs/screenshots/round-mobile.png" alt="A round on a phone" width="300"> |
+| ![The home page with a search for Feel Something and saved playlists](docs/screenshots/home.png) | <img src="docs/screenshots/round-mobile.png" alt="A round on a phone" width="300"> |
 
 ## How it fits together
 
