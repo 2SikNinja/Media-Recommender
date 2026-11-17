@@ -96,7 +96,7 @@ function seedsFromRow(session: SessionRow): Track[] {
   return [seedFromRow(session), ...session.extra_seeds];
 }
 
-function seedFromRow(session: SessionRow): Track {
+function seedFromRow(session: Pick<SessionRow, "seed_track_key" | "seed_artist" | "seed_title">): Track {
   return {
     trackKey: session.seed_track_key,
     artist: session.seed_artist,
@@ -197,6 +197,26 @@ export function playlistTitle(seeds: Track[]): string {
   const titles = seeds.map((seed) => seed.title);
   const joined = titles.length <= 2 ? titles.join(" and ") : `${titles.slice(0, -1).join(", ")} and ${titles.at(-1)}`;
   return `Inspired by ${joined}`.slice(0, 200);
+}
+
+type RemixRow = Pick<SessionRow, "seed_track_key" | "seed_artist" | "seed_title" | "extra_seeds" | "total_rounds" | "playlist_size">;
+
+/**
+ * Starts a new session from someone else's playlist: the same seed songs,
+ * number of rounds and playlist length, with fresh rounds to pick from. The
+ * original playlist isn't touched.
+ */
+export async function remixPlaylist(deps: SessionDeps, playlistId: string): Promise<SessionState> {
+  const [row] = await deps.db.query<RemixRow>(
+    `select s.seed_track_key, s.seed_artist, s.seed_title, s.extra_seeds, s.total_rounds, s.playlist_size
+       from playlists p
+       join sessions s on s.id = p.session_id
+      where p.id = $1`,
+    [playlistId],
+  );
+  if (!row) throw new ApiError("notFound", "That playlist doesn't exist.");
+  const seeds = [seedFromRow(row), ...row.extra_seeds].map(({ artist, title }) => ({ artist, title }));
+  return createSession(deps, { seeds, rounds: row.total_rounds, playlistSize: row.playlist_size });
 }
 
 export async function createSession(deps: SessionDeps, input: CreateSessionInput): Promise<SessionState> {
