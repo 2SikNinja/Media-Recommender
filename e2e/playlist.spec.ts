@@ -33,3 +33,7 @@ test("prepares the YouTube links as the page opens", async ({ page, api }) => {
   await expect.poll(() => api.calls.some((call) => call.path.endsWith("/export/youtube"))).toBe(true);
   await expect(page.getByRole("link", { name: /Open in YouTube Music/ })).toBeVisible();
 });
+
+test("says why a song is in the playlist", async ({ page }) => {
+  await expect(page.locator("ol > li").first()).toContainText("Your starting song");
+});
