@@ -1,5 +1,6 @@
 import { describeError, reportProblem } from "./alerts";
 import { ApiError } from "./apiErrors";
+import type { PlaylistReason } from "./candidatePool";
 import type { Db } from "./dbTypes";
 import { ResolverError, type Resolver } from "./resolverClient";
 import {
@@ -18,6 +19,8 @@ export type PlaylistTrack = {
   artist: string;
   title: string;
   youtubeVideoId: string | null;
+  /** Why the song is in the playlist. Null for playlists made before this was recorded. */
+  reason: PlaylistReason | null;
 };
 
 export type Playlist = {
@@ -39,13 +42,14 @@ type PlaylistTrackRow = {
   artist: string;
   title: string;
   youtube_video_id: string | null;
+  reason: PlaylistReason | null;
 };
 
 export async function getPlaylist(db: Db, playlistId: string): Promise<Playlist> {
   const [playlistRows, trackRows] = await Promise.all([
     db.query<PlaylistRow>("select id, session_id, title, created_at from playlists where id = $1", [playlistId]),
     db.query<PlaylistTrackRow>(
-      `select position, track_key, artist, title, youtube_video_id, removed_at is not null as is_removed
+      `select position, track_key, artist, title, youtube_video_id, reason, removed_at is not null as is_removed
          from playlist_tracks where playlist_id = $1 order by position`,
       [playlistId],
     ),
@@ -71,6 +75,7 @@ function toPlaylistTrack(row: PlaylistTrackRow): PlaylistTrack {
     artist: row.artist,
     title: row.title,
     youtubeVideoId: row.youtube_video_id,
+    reason: row.reason ?? null,
   };
 }
 
